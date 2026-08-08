@@ -37,7 +37,7 @@ render perfectly inside GitHub's README sandbox.
 | `apps/web` | React + Tailwind visual editor (Vite) |
 | `apps/api` | Go backend — auth, projects, connector vault, render orchestration |
 | `apps/renderer` | Internal Node render service — satori pipeline, animation, sanitizer, fonts |
-| `packages/schema` | JSON Schemas: design document, project, connector manifest, render API |
+| `packages/schema` | JSON Schemas: design document, project, connector manifest, render API, kit component |
 | `packages/kit` | Official component kit (declarative, Camo-safe) |
 | `packages/action` | GitHub Action + workflow templates for the schedule plane |
 | `examples/` | Canonical demo design + data fixtures used by tests and the editor |

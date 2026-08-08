@@ -15,6 +15,7 @@ import (
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/connector"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/fixture"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/httpapi"
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/kit"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/render"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
@@ -43,6 +44,13 @@ func run(log *slog.Logger) error {
 
 	renderer := render.NewClient(cfg.RendererURL, 15*time.Second)
 
+	// Kit registry: palette metadata for GET /v1/kit, loaded once at startup.
+	kitComponents, err := kit.Load(cfg.KitDir, log)
+	if err != nil {
+		return err
+	}
+	log.Info("kit loaded", "components", len(kitComponents))
+
 	var demoData map[string]any // preview fallback, dev only
 	if cfg.Dev() {
 		if err := fixture.LoadJSON(cfg.DemoDataPath, &demoData); err != nil {
@@ -54,7 +62,7 @@ func run(log *slog.Logger) error {
 		log.Info("dev seed loaded", "project", "demo", "token", "dev-demo-token")
 	}
 
-	server := httpapi.NewServer(cfg, log, stores, cache, renderer, demoData)
+	server := httpapi.NewServer(cfg, log, stores, cache, renderer, demoData, kitComponents)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.Handler(),

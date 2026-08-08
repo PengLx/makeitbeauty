@@ -32,6 +32,53 @@ export function splitNodes(nodes: DesignNode[]): SplitNodes {
   return { staticNodes, animatedNodes };
 }
 
+/**
+ * Several nodes that animate together as ONE composed layer — produced by
+ * instance expansion when the instance itself carries an animation
+ * (architecture.md §5.7: the expanded group is one <g id="node-{instanceId}">).
+ */
+export interface NodeGroup {
+  kind: "group";
+  id: string;
+  animation: Animation;
+  nodes: DesignNode[];
+}
+
+/** Pipeline item after instance expansion: a plain node, or an animated group. */
+export type RenderItem = DesignNode | NodeGroup;
+
+/** One transparent satori pass composed as one <g id="node-{id}"> layer. */
+export interface LayerSpec {
+  id: string;
+  animation: Animation;
+  nodes: DesignNode[];
+}
+
+export interface SplitRenderItems {
+  staticNodes: DesignNode[];
+  layers: LayerSpec[];
+}
+
+/**
+ * Group-aware generalization of splitNodes: plain nodes keep the existing
+ * per-node behavior (each animated node is its own single-node layer), while
+ * a NodeGroup becomes one multi-node layer. Ordering follows item order.
+ */
+export function splitRenderItems(items: RenderItem[]): SplitRenderItems {
+  const staticNodes: DesignNode[] = [];
+  const layers: LayerSpec[] = [];
+  for (const item of items) {
+    if ("kind" in item) {
+      layers.push({ id: item.id, animation: item.animation, nodes: item.nodes });
+    } else if (item.animation) {
+      layers.push({ id: item.id, animation: item.animation, nodes: [item] });
+    } else {
+      staticNodes.push(item);
+    }
+  }
+  return { staticNodes, layers };
+}
+
 /** Remove satori's outer <svg …>…</svg> wrapper, keeping the inner markup. */
 export function stripSvgWrapper(svg: string): string {
   const match = svg.match(/^\s*<svg[^>]*>([\s\S]*)<\/svg>\s*$/);
@@ -71,8 +118,9 @@ export function buildStyleBlock(presets: Iterable<AnimationPreset>): string {
 }
 
 export interface AnimatedLayer {
-  node: DesignNode;
-  /** Inner SVG markup of this node's transparent satori pass (wrapper stripped). */
+  /** The animated node — or, for an expanded instance group, its id + animation. */
+  node: Pick<DesignNode, "id" | "animation">;
+  /** Inner SVG markup of this layer's transparent satori pass (wrapper stripped). */
   inner: string;
 }
 

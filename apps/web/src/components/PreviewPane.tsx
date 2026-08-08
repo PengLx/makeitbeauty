@@ -5,59 +5,57 @@ interface Props {
 }
 
 /**
- * Renders the live preview centered on a dotted canvas. The preview is an
- * <img> pointing at a blob: URL of the API-rendered SVG — the same constraint
- * set the final image lives under behind GitHub's Camo proxy.
+ * Live preview panel (right column). The image is the API-rendered SVG via a
+ * blob: URL in an <img> — the same constraint set the final image lives under
+ * behind GitHub's Camo proxy. The canvas approximates; this is ground truth.
  */
 export function PreviewPane({ preview }: Props) {
   const { url, error, loading } = preview;
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex shrink-0 flex-col border-t">
+      <div className="flex items-center justify-between px-4 pt-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Preview
+        </h2>
+        {loading && (
+          <span className="text-[10px] text-muted-foreground">rendering…</span>
+        )}
+      </div>
+
       <div
-        className="relative flex flex-1 items-center justify-center overflow-auto p-8
-          [background-image:radial-gradient(circle,#21262d_1px,transparent_1px)]
-          [background-size:16px_16px]"
+        className="relative m-3 flex min-h-28 items-center justify-center overflow-hidden rounded-lg border p-3
+          [background-image:radial-gradient(circle,var(--color-border)_1px,transparent_1px)]
+          [background-size:12px_12px]"
       >
         {url ? (
           <img
             src={url}
             alt="Design preview"
-            className="max-h-full max-w-full rounded-lg shadow-[0_8px_32px_rgba(1,4,9,0.6)]"
+            className="max-h-52 max-w-full rounded-md shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
           />
         ) : !error ? (
-          <p className="text-sm text-[#7d8590]">
+          <p className="text-xs text-muted-foreground">
             {loading ? "Rendering…" : "Waiting for first render…"}
           </p>
         ) : null}
 
-        {loading && url && (
-          <span className="absolute right-3 top-3 rounded-full bg-[#161b22] px-2.5 py-1 text-[11px] text-[#7d8590]">
-            rendering…
-          </span>
-        )}
-
         {error && (
-          <div className="absolute inset-x-8 bottom-8 rounded-md border border-[#f8514966] bg-[#f851491a] px-4 py-3">
-            <p className="text-sm font-medium text-[#f85149]">
+          <div className="absolute inset-x-2 bottom-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+            <p className="text-xs font-medium text-destructive">
               Render failed{" "}
-              <span className="font-mono text-xs text-[#f8514999]">
-                [{error.code}]
-              </span>
+              <span className="font-mono text-[10px] opacity-70">[{error.code}]</span>
             </p>
-            <p className="mt-1 text-xs text-[#e6edf3]">{error.message}</p>
+            <p className="mt-0.5 line-clamp-3 text-[11px] text-foreground">
+              {error.message}
+            </p>
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between border-t border-[#30363d] bg-[#010409] px-4 py-2">
-        <span className="text-[11px] text-[#484f58]">
-          Drag &amp; resize on canvas comes later — edit via the Code tab for now.
-        </span>
-        <span className="text-[11px] text-[#7d8590]">
-          renders via API — preview = production
-        </span>
-      </div>
+      <p className="px-4 pb-3 text-[10px] text-muted-foreground">
+        preview = production render
+      </p>
     </div>
   );
 }

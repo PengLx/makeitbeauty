@@ -99,6 +99,16 @@ independently. The renderer is *never* exposed publicly.
    used. Editor styling compiles Tailwind-subset classes to plain style objects,
    validated against satori's supported-property whitelist; unsupported classes are
    editor lint errors.
+7. **Instance expansion**: `instance` nodes resolve against the kit registry
+   (`packages/kit/components`, format pinned by
+   `packages/schema/kit-component.schema.json`): fragment nodes are uniform-scaled
+   (`min(w/frame.w, h/frame.h)`, top-left aligned) into the instance box;
+   `{{props.*}}` slots resolve with the standard template engine; restricted
+   `computed` entries map a numeric prop linearly onto node geometry
+   (`prop × scale`, clamped) — declarative, no code execution. Expansion runs
+   before the satori passes, so animation compositing and sanitization only ever
+   see plain nodes. An instance's own `animation` applies to its expanded group as
+   one layer.
 
 The editor's live preview calls the same render path (`POST /v1/preview`), so
 preview = production output, byte for byte.
@@ -169,6 +179,9 @@ target. Credentials use envelope encryption with KMS-managed keys (see SECURITY.
   back to demo fixtures. Responds `image/svg+xml`. Used by the editor's live preview.
 - `POST /v1/projects`, `GET /v1/projects`, `GET /v1/projects/{id}` — session auth
   (stubbed in scaffold).
+- `GET /v1/kit` — public kit component metadata for the editor palette:
+  `[{id: "kit/stat-card", title, description?, frame: {w, h}, props}]`, served
+  from `packages/kit/components`.
 - Errors: JSON envelope `{"error":{"code":"...","message":"..."}}` with proper
   status codes. Render failures MUST be non-200 so the Action fails soft.
 - Rate limits: per-deploy-token minimum render interval (dev default: none;

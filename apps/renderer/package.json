@@ -8,7 +8,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "test": "vitest run",
-    "demo": "tsx src/demo.ts"
+    "demo": "tsx src/demo.ts",
+    "demo:kit": "tsx src/demo.ts kit"
   },
   "dependencies": {
     "ajv": "^8.17.1",

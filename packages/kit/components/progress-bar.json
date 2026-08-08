@@ -14,7 +14,7 @@
       "default": 70
     },
     "color": {
-      "type": "color",
+      "type": "string",
       "description": "Fill color of the bar.",
       "default": "#58a6ff"
     }

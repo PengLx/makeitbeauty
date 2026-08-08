@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://makeitbeauty.dev/schemas/kit-component.v0.json",
+  "title": "MakeItBeauty kit component (v0)",
+  "description": "A declarative, parameterized design fragment, referenced from designs as \"kit/{id}\". Nodes are design-schema nodes positioned relative to the frame; {{props.*}} slots resolve with the standard template engine; computed entries map a numeric prop linearly onto node geometry (prop × scale, clamped) — no code execution. Nested instance nodes are not allowed (v0). This file is the contract for packages/kit/components.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "frame", "props", "nodes"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "maxLength": 64,
+      "description": "Component id; instances reference it as \"kit/{id}\"."
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "description": { "type": "string", "maxLength": 1000 },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["w", "h"],
+      "description": "The component's own coordinate space. Expansion uniform-scales it into the instance box by s = min(instance.w/frame.w, instance.h/frame.h), top-left aligned.",
+      "properties": {
+        "w": { "type": "number", "exclusiveMinimum": 0, "maximum": 4096 },
+        "h": { "type": "number", "exclusiveMinimum": 0, "maximum": 4096 }
+      }
+    },
+    "props": {
+      "type": "object",
+      "description": "Declared slots. Instance props merge over these defaults; {{props.name}} placeholders in nodes resolve to the merged values.",
+      "maxProperties": 32,
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/propDecl" }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "description": "Design-schema fragment, positioned relative to the frame — (0,0) is the component's own top-left corner.",
+      "items": { "$ref": "#/$defs/fragmentNode" }
+    },
+    "computed": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/computedEntry" }
+    }
+  },
+  "$defs": {
+    "propDecl": {
+      "description": "A prop slot: type, optional description, and the default used when an instance omits the prop (and for the palette preview). The default must match the declared type. Color props are strings.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "default"],
+          "properties": {
+            "type": { "const": "string" },
+            "description": { "type": "string", "maxLength": 500 },
+            "default": { "type": "string", "maxLength": 2000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "default"],
+          "properties": {
+            "type": { "const": "number" },
+            "description": { "type": "string", "maxLength": 500 },
+            "default": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "fragmentNode": {
+      "description": "Exactly the design-schema node types minus instance — nested instances are rejected in v0.",
+      "oneOf": [
+        { "$ref": "design.v0.json#/$defs/textNode" },
+        { "$ref": "design.v0.json#/$defs/rectNode" },
+        { "$ref": "design.v0.json#/$defs/imageNode" }
+      ]
+    },
+    "computedEntry": {
+      "type": "object",
+      "description": "Linear map from a numeric prop onto a node's geometry: node[field] = clamp(props[prop] × scale, clamp[0], clamp[1]), in frame coordinates (instance scaling applies afterwards). Deliberately not an expression language.",
+      "additionalProperties": false,
+      "required": ["node", "prop", "field", "scale", "clamp"],
+      "properties": {
+        "node": { "type": "string", "description": "id of a node in this component's nodes" },
+        "prop": { "type": "string", "description": "name of a declared prop of type number" },
+        "field": { "enum": ["x", "y", "w", "h"] },
+        "scale": { "type": "number" },
+        "clamp": {
+          "type": "array",
+          "prefixItems": [{ "type": "number" }, { "type": "number" }],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": false,
+          "description": "[min, max] applied after scaling the prop."
+        }
+      }
+    }
+  }
+}

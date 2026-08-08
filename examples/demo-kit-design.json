@@ -1,0 +1,51 @@
+{
+  "version": 0,
+  "name": "Demo kit card",
+  "canvas": { "width": 800, "height": 400, "background": "#0d1117", "radius": 16 },
+  "nodes": [
+    {
+      "id": "stars",
+      "type": "instance",
+      "x": 40, "y": 40, "w": 260, "h": 140,
+      "component": "kit/stat-card",
+      "props": {
+        "label": "TOTAL STARS",
+        "value": "{{github.stats.totalStars}}",
+        "caption": "across public repos"
+      }
+    },
+    {
+      "id": "followers",
+      "type": "instance",
+      "x": 340, "y": 40, "w": 260, "h": 140,
+      "component": "kit/stat-card",
+      "props": {
+        "label": "FOLLOWERS",
+        "value": "{{github.user.followers}}",
+        "caption": "on GitHub",
+        "accent": "#3fb950"
+      }
+    },
+    {
+      "id": "lang-bar",
+      "type": "instance",
+      "x": 40, "y": 204, "w": 480, "h": 72,
+      "component": "kit/progress-bar",
+      "props": {
+        "label": "{{github.stats.topLanguage}}",
+        "percent": 62
+      }
+    },
+    {
+      "id": "banner",
+      "type": "instance",
+      "x": 40, "y": 296, "w": 540, "h": 90,
+      "component": "kit/text-banner",
+      "props": {
+        "title": "Hi, I'm {{github.user.name}}",
+        "subtitle": "designed with MakeItBeauty"
+      },
+      "animation": { "preset": "fadeIn", "durationMs": 900 }
+    }
+  ]
+}

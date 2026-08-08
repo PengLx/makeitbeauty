@@ -5,7 +5,10 @@ design fragment that users drop onto the canvas as an `instance` node.
 
 ## Kit format (v0)
 
-A component is a single JSON file:
+The format is pinned by
+[`packages/schema/kit-component.schema.json`](../schema/kit-component.schema.json)
+— every component is ajv-validated against it when the renderer boots. A
+component is a single JSON file:
 
 ```jsonc
 {
@@ -21,11 +24,13 @@ A component is a single JSON file:
 
 - **`nodes`** is a design fragment: an array using exactly the node types of
   [`packages/schema/design.schema.json`](../schema/design.schema.json)
-  (`text`, `rect`, `image`), positioned **relative to the declared
-  `frame` w/h** — `(0,0)` is the component's own top-left corner.
+  (`text`, `rect`, `image` — nested `instance` nodes are rejected at load
+  time in v0), positioned **relative to the declared `frame` w/h** — `(0,0)`
+  is the component's own top-left corner.
 - **`props`** declares the component's slots. Each prop has a `type`
-  (`string`, `number`, or `color`), a `description`, and a `default` used
-  when an instance omits the prop (and for the palette preview).
+  (`string` or `number` — colors are strings), an optional `description`,
+  and a required `default` used when an instance omits the prop (and for the
+  palette preview). Defaults must match the declared type.
 - **Instances** reference a component as `kit/{id}` and pass props:
 
   ```json
@@ -37,20 +42,39 @@ A component is a single JSON file:
   }
   ```
 
-### Slot resolution
+### Slot resolution and expansion
 
 `{{props.*}}` placeholders inside a component's nodes resolve with **the same
 template engine as connector data** — the one that substitutes
-`{{path.to.field}}` from data snapshots at render time. Expansion order:
+`{{path.to.field}}` from data snapshots at render time. Expansion order
+(implemented in `apps/renderer/src/kit.ts`, run before the static/animated
+split so the rest of the pipeline only ever sees plain nodes):
 
-1. The instance node is replaced by the component's nodes, translated by the
-   instance's `(x, y)` and scaled by `instance.w/frame.w`, `instance.h/frame.h`.
-2. `{{props.*}}` slots are filled from the instance's `props` (falling back
-   to declared defaults).
-3. Any *remaining* templates (e.g. a prop value that was itself
-   `{{github.user.followers}}`) resolve against the data snapshot, exactly
-   like templates in plain nodes. Missing paths become an em-dash placeholder
-   with a warning — never a render failure.
+1. The instance's `props` resolve against the data snapshot (standard
+   pipeline template step) — so a prop value like
+   `"{{github.user.followers}}"` arrives as live data. Missing paths become
+   an em-dash placeholder with a warning — never a render failure.
+2. Resolved props merge over the declared defaults. `number` props
+   type-check: a number or numeric string passes (data-bound values arrive
+   as strings and are coerced); anything else warns and falls back to the
+   declared default. Undeclared props warn and are ignored.
+3. The component's nodes are deep-copied and every `{{props.*}}` slot (and
+   any direct `{{data.path}}` template a fragment may carry) resolves
+   against `{…snapshot, props}`.
+4. `computed` entries apply (see below), in frame coordinates.
+5. The fragment **uniform-scales** into the instance box:
+   `s = min(instance.w/frame.w, instance.h/frame.h)`, top-left aligned.
+   Positions and sizes multiply by `s`, as do `fontSize` (pinned to the 16px
+   default when unset), `letterSpacing`, `radius` and `strokeWidth`. Then
+   everything translates by the instance's `(x, y)`.
+6. Expanded node ids are prefixed `{instanceId}__` so two instances of the
+   same component never collide.
+
+An **unknown component id** renders the dashed placeholder with a warning —
+never a render failure. An instance's own `animation` applies to its expanded
+nodes **as one composed layer** (`<g id="node-{instanceId}">`); animations on
+individual fragment nodes are ignored (with a warning) inside an animated
+instance, and compose per-node as usual otherwise.
 
 Slots may appear anywhere the design schema accepts a string: text content
 and colors. Numeric geometry cannot hold a template (the schema types those

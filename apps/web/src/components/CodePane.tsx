@@ -14,15 +14,15 @@ export function CodePane({ code, onChange, parseError }: Props) {
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
         aria-label="Design JSON"
-        className="flex-1 resize-none bg-[#0d1117] p-4 font-mono text-[13px] leading-relaxed
-          text-[#e6edf3] outline-none placeholder:text-[#484f58]"
+        className="flex-1 resize-none bg-background p-4 font-mono text-[13px] leading-relaxed
+          text-foreground outline-none placeholder:text-muted-foreground"
         placeholder="Design JSON…"
       />
       <div
         className={`border-t px-4 py-2 text-xs ${
           parseError
-            ? "border-[#f8514966] bg-[#f851491a] text-[#f85149]"
-            : "border-[#30363d] bg-[#010409] text-[#484f58]"
+            ? "border-destructive/40 bg-destructive/10 text-destructive"
+            : "bg-card text-muted-foreground"
         }`}
       >
         {parseError ? (
@@ -31,7 +31,7 @@ export function CodePane({ code, onChange, parseError }: Props) {
             preview shows the last valid design.
           </>
         ) : (
-          "Valid JSON — preview updates as you type (500 ms debounce)."
+          "Valid JSON — canvas and preview update as you type (500 ms debounce)."
         )}
       </div>
     </div>

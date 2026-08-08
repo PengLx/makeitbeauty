@@ -19,7 +19,7 @@
       "default": "+12 this week"
     },
     "accent": {
-      "type": "color",
+      "type": "string",
       "description": "Accent color for the caption and underline tick.",
       "default": "#58a6ff"
     }

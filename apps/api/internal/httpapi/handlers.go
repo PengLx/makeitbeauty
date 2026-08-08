@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/connector"
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/kit"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/render"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
@@ -18,6 +19,20 @@ import (
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// ---- GET /v1/kit --------------------------------------------------------
+// Public kit metadata for the editor palette (architecture.md §8). The list
+// is loaded once at startup and immutable, so a short client cache matches
+// the Camo/raw cadence used elsewhere.
+
+func (s *Server) handleKit(w http.ResponseWriter, _ *http.Request) {
+	components := s.kit
+	if components == nil {
+		components = []kit.Component{} // always a JSON array, never null
+	}
+	w.Header().Set("Cache-Control", "max-age=300")
+	writeJSON(w, http.StatusOK, components)
 }
 
 // ---- POST /v1/projects/{id}/render?output={outputId} -------------------

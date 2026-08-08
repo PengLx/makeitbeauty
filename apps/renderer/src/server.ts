@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { loadFontsOrExit, type LoadedFont } from "./fonts.js";
+import { kitRegistry } from "./kit.js";
 import { render } from "./pipeline.js";
 import { SanitizeError } from "./sanitize.js";
 import type { RenderOptions } from "./types.js";
@@ -19,6 +20,8 @@ const THEMES = new Set(["auto", "light", "dark"]);
 
 // Fonts load once at startup (exits with guidance if fonts/ is empty).
 const fonts: LoadedFont[] = loadFontsOrExit();
+// Kit components load + ajv-validate once at startup (throws KitError on a bad one).
+const kit = kitRegistry();
 
 /** Error envelope per packages/schema/render.schema.json. */
 function sendError(res: ServerResponse, status: number, code: string, message: string): void {
@@ -119,6 +122,7 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 
 server.listen(port, host, () => {
   console.log(
-    `renderer (internal only) listening on ${host}:${port} — ${fonts.length} font file(s) loaded`,
+    `renderer (internal only) listening on ${host}:${port} — ` +
+      `${fonts.length} font file(s), ${kit.size} kit component(s) loaded`,
   );
 });

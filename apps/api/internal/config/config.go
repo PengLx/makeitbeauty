@@ -17,6 +17,9 @@ type Config struct {
 	DemoDataPath string
 	// DemoDesignPath points at the demo design fixture (MIB_DEMO_DESIGN).
 	DemoDesignPath string
+	// KitDir points at the official kit component directory (MIB_KIT_DIR).
+	// Relative paths are resolved robustly; see internal/kit.
+	KitDir string
 }
 
 // Load reads configuration from the environment, applying defaults.
@@ -27,6 +30,7 @@ func Load() Config {
 		Env:            getenv("MIB_ENV", "dev"),
 		DemoDataPath:   getenv("MIB_DEMO_DATA", "../../examples/demo-data.json"),
 		DemoDesignPath: getenv("MIB_DEMO_DESIGN", "../../examples/demo-design.json"),
+		KitDir:         getenv("MIB_KIT_DIR", "../../packages/kit/components"),
 	}
 }
 

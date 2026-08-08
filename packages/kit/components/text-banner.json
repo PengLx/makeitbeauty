@@ -14,7 +14,7 @@
       "default": "Turning data into designed pixels"
     },
     "accent": {
-      "type": "color",
+      "type": "string",
       "description": "Color of the vertical accent tick.",
       "default": "#58a6ff"
     }

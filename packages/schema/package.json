@@ -2,11 +2,19 @@
   "name": "@makeitbeauty/schema",
   "version": "0.0.1",
   "private": true,
-  "description": "JSON Schemas shared across MakeItBeauty services: design document, project, connector manifest, internal render API.",
+  "description": "JSON Schemas shared across MakeItBeauty services: design document, project, connector manifest, internal render API, kit component.",
   "files": [
     "design.schema.json",
     "project.schema.json",
     "connector-manifest.schema.json",
-    "render.schema.json"
-  ]
+    "render.schema.json",
+    "kit-component.schema.json"
+  ],
+  "scripts": {
+    "validate": "node validate.mjs",
+    "test": "node validate.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1"
+  }
 }

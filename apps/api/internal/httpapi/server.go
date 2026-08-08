@@ -8,6 +8,7 @@ import (
 
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/config"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/connector"
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/kit"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/render"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
@@ -22,11 +23,14 @@ type Server struct {
 	// demoData is the merged demo fixture ({"github": {...}}) used as the
 	// /v1/preview fallback when the request omits data. Nil outside dev.
 	demoData map[string]any
+	// kit is the palette metadata served by GET /v1/kit, loaded once at
+	// startup and sorted by id.
+	kit []kit.Component
 }
 
 // NewServer wires a Server. demoData may be nil (non-dev).
-func NewServer(cfg config.Config, log *slog.Logger, stores store.Stores, cache *connector.SnapshotCache, renderer *render.Client, demoData map[string]any) *Server {
-	return &Server{cfg: cfg, log: log, stores: stores, cache: cache, renderer: renderer, demoData: demoData}
+func NewServer(cfg config.Config, log *slog.Logger, stores store.Stores, cache *connector.SnapshotCache, renderer *render.Client, demoData map[string]any, kitComponents []kit.Component) *Server {
+	return &Server{cfg: cfg, log: log, stores: stores, cache: cache, renderer: renderer, demoData: demoData, kit: kitComponents}
 }
 
 // Handler builds the full middleware + route stack.
@@ -34,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /v1/kit", s.handleKit)
 	mux.HandleFunc("POST /v1/projects/{id}/render", s.requireDeployToken(s.handleRender))
 	mux.HandleFunc("POST /v1/preview", s.handlePreview)
 	mux.HandleFunc("POST /v1/projects", s.requireSession(s.handleCreateProject))
