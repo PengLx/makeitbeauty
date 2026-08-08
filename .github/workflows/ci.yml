@@ -68,3 +68,27 @@ jobs:
             echo "::error title=Determinism violation::demo-kit.svg is not byte-identical across two renders — deterministic output is a stated product contract (architecture.md §3)"
             exit 1
           fi
+
+  # Deployment images (deploy/docker/, architecture.md §4): every push proves
+  # all three images build. No push, no registry — build-only verification for
+  # the compose/Coolify deployment path (docs/deploy-coolify.md).
+  images:
+    name: "Image build (${{ matrix.image }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, renderer, web]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image }} image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file "deploy/docker/${{ matrix.image }}.Dockerfile" \
+            .

@@ -74,6 +74,16 @@ equivalent. Go owns the public plane (auth, tokens, orchestration — where Go's
 strengths matter); the renderer is a small stateless Node service scaled
 independently. The renderer is *never* exposed publicly.
 
+**Deployment** (Coolify / any compose host): one Dockerfile per service under
+`deploy/docker/`, composed by the root `docker-compose.yml`. Only `web` (nginx:
+static SPA + `/v1` reverse proxy to `api`) is public — a single domain serves both
+the editor and the render API, so the GitHub Action's `api-url` is just that
+domain. `renderer` stays on the internal network; `api` state lives on a named
+volume. Configuration via env (`.env.example` documents every `MIB_*` var).
+`MIB_ENV=production` semantics: no dev seed, no implicit user (auth must be
+configured), `/v1/preview` requires a session, CORS locked to `MIB_PUBLIC_URL`,
+Secure cookies.
+
 ## 5. Rendering pipeline (`apps/renderer`)
 
 1. **Validate** the design document against `packages/schema/design.schema.json`.
@@ -190,6 +200,25 @@ with KMS-managed keys (see SECURITY.md).
 - `GET /v1/kit` — public kit component metadata for the editor palette:
   `[{id: "kit/stat-card", title, description?, frame: {w, h}, props}]`, served
   from `packages/kit/components`.
+- Auth (GitHub App user OAuth): `GET /v1/auth/github/login` → 302 to GitHub
+  authorize (CSRF `state` in a short-lived cookie); `GET /v1/auth/github/callback`
+  → code exchange (user token, 8h + refresh), upsert user, provision the GitHub
+  ConnectorAccount (credentials sealed at rest), set session, 302 to the app;
+  `POST /v1/auth/logout`; `GET /v1/me` → `{user, connectors:[{connector, status}]}`
+  or 401. Sessions: server-side store, random id in an HttpOnly `mib_session`
+  cookie (SameSite=Lax; Secure in production; 30-day expiry). Tokens never reach
+  the browser (BFF). Dev fallback: with `MIB_ENV=dev` and no
+  `MIB_GITHUB_CLIENT_ID`, the implicit dev user remains (`/v1/me` flags
+  `dev: true`); production without auth config refuses to boot.
+- `GET /v1/connectors` — session auth: the user's connector status plus available
+  snapshot field paths (drives the editor's insert-binding picker):
+  `[{connector: "github", status: "connected"|"unconfigured"|"expired", fields: [{path, description}]}]`.
+- Auth/crypto env: `MIB_PUBLIC_URL`, `MIB_MASTER_KEY` (base64 32-byte key;
+  credential sealing), `MIB_GITHUB_CLIENT_ID`, `MIB_GITHUB_CLIENT_SECRET`,
+  `MIB_GITHUB_APP_SLUG` (install link; reserved), `MIB_GITHUB_URL` /
+  `MIB_GITHUB_API_URL` (GitHub endpoint overrides for Enterprise/tests).
+  Sessions are server-side records looked up by random id, so no signing key
+  exists (`MIB_SESSION_KEY` was dropped as unnecessary).
 - Errors: JSON envelope `{"error":{"code":"...","message":"..."}}` with proper
   status codes. Render failures MUST be non-200 so the Action fails soft.
 - Rate limits: per-deploy-token minimum render interval (dev default: none;
@@ -213,8 +242,11 @@ curl -X POST -H "Authorization: Bearer dev-demo-token" \
 
 ## 9. Security commitments (summary; full text in SECURITY.md)
 
-1. Token columns envelope-encrypted (app-level AES, keys in KMS, separated from DB
-   access). Disk encryption alone does not count.
+1. Credentials sealed at rest with AES-256-GCM behind a `Sealer` interface —
+   self-host tier: master key from `MIB_MASTER_KEY` (env, never in the repo);
+   scale tier: KMS-managed envelope keys behind the same interface. Disk
+   encryption alone does not count. Dev without a key runs unsealed with a loud
+   startup warning; production with auth configured requires the key (fatal).
 2. Prefer short-lived upstream tokens (GitHub App 8h + refresh).
 3. BFF: tokens never reach the browser; the editor holds only a session.
 4. Components receive filtered data snapshots, never credentials — this is the

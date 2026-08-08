@@ -8,9 +8,10 @@ through **connectors** (GitHub, WakaTime, …), and publish self-contained anima
 render perfectly inside GitHub's README sandbox.
 
 > Status: **usable self-host alpha** — visual editor (shadcn/ui), kit components with
-> live-data bindings, durable projects, deploy-token lifecycle, and CI-enforced
-> deterministic renders. GitHub App login and hosted connectors are the next
-> milestones ([docs/architecture.md](docs/architecture.md) §10).
+> live-data bindings, durable projects, deploy-token lifecycle, GitHub App sign-in
+> with a live GitHub connector (sealed credentials), Docker/Coolify deployment, and
+> CI-enforced deterministic renders. More connectors and community components are the
+> next milestones ([docs/architecture.md](docs/architecture.md) §10).
 
 ## How it works — the three-plane model
 
@@ -63,6 +64,13 @@ make dev-web
 # or render the demo fixture straight to a file:
 make demo   # → apps/renderer/out/demo.svg
 ```
+
+## Deploy (self-host)
+
+The whole stack ships as three Docker images (`deploy/docker/`) composed by the root
+`docker-compose.yml` — one public domain serves the editor and the render API. See
+**[docs/deploy-coolify.md](docs/deploy-coolify.md)** for the step-by-step Coolify (or any
+compose host) guide, and [`.env.example`](.env.example) for every configuration knob.
 
 ## Design principles
 

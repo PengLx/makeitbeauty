@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/auth"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/config"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/connector"
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/crypto"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/fixture"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/httpapi"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/kit"
@@ -31,15 +33,39 @@ func main() {
 
 func run(log *slog.Logger) error {
 	cfg := config.Load()
-	stores, err := newStores(cfg, log)
+	// Production boot requirements (architecture.md §4): refuse to run
+	// without auth, the public URL, and the sealing key.
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	stores, sessions, err := newStores(cfg, log)
 	if err != nil {
 		return err
 	}
 
-	// Connector registry: the GitHub stub serves the demo fixture; the cache
-	// and filtering around it are the production code paths.
+	sealer, err := newSealer(cfg, log)
+	if err != nil {
+		return err
+	}
+
+	// GitHub App user OAuth; nil when unconfigured (dev fallback user).
+	var oauth *auth.GitHubOAuth
+	if cfg.GitHubClientID != "" {
+		oauth = auth.NewGitHubOAuth(cfg.GitHubURL, cfg.GitHubAPIURL, cfg.GitHubClientID, cfg.GitHubClientSecret)
+	} else {
+		log.Info("github auth unconfigured; dev fallback user active", "env", cfg.Env)
+	}
+
+	// Connector registry: the GitHub connector serves live GraphQL data for
+	// credentialed accounts and the demo fixture otherwise; the cache and
+	// filtering around it are shared production code paths.
 	registry := connector.NewRegistry()
-	github, err := connector.NewGitHubStub(cfg.DemoDataPath)
+	github, err := connector.NewGitHub(cfg.DemoDataPath, connector.GitHubDeps{
+		APIBaseURL: cfg.GitHubAPIURL,
+		OAuth:      oauth,
+		Sealer:     sealer,
+		Accounts:   stores.ConnectorAccounts,
+	})
 	if err != nil {
 		return err
 	}
@@ -66,7 +92,16 @@ func run(log *slog.Logger) error {
 		log.Info("dev seed ensured", "project", "demo", "token", "dev-demo-token")
 	}
 
-	server := httpapi.NewServer(cfg, log, stores, cache, renderer, demoData, kitComponents)
+	server := httpapi.NewServer(cfg, log, httpapi.Deps{
+		Stores:   stores,
+		Sessions: sessions,
+		Sealer:   sealer,
+		OAuth:    oauth,
+		Cache:    cache,
+		Renderer: renderer,
+		DemoData: demoData,
+		Kit:      kitComponents,
+	})
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.Handler(),
@@ -99,17 +134,46 @@ func run(log *slog.Logger) error {
 
 // newStores selects the persistence backend per MIB_STORE (architecture.md
 // §7): the durable file-backed JSON store by default, in-memory on request.
-func newStores(cfg config.Config, log *slog.Logger) (store.Stores, error) {
+// Sessions follow the same backend (sessions.json in the same data dir).
+func newStores(cfg config.Config, log *slog.Logger) (store.Stores, auth.Sessions, error) {
 	switch cfg.Store {
 	case "file":
 		log.Info("using file store", "dir", cfg.DataDir)
-		return store.NewFile(cfg.DataDir)
+		stores, err := store.NewFile(cfg.DataDir)
+		if err != nil {
+			return store.Stores{}, nil, err
+		}
+		sessions, err := auth.NewFileSessions(cfg.DataDir)
+		if err != nil {
+			return store.Stores{}, nil, err
+		}
+		return stores, sessions, nil
 	case "memory":
 		log.Info("using in-memory store (data is lost on exit)")
-		return store.NewMemory(), nil
+		return store.NewMemory(), auth.NewMemorySessions(), nil
 	default:
-		return store.Stores{}, fmt.Errorf("unknown MIB_STORE %q (want \"file\" or \"memory\")", cfg.Store)
+		return store.Stores{}, nil, fmt.Errorf("unknown MIB_STORE %q (want \"file\" or \"memory\")", cfg.Store)
 	}
+}
+
+// newSealer selects the credential sealer (architecture.md §9.1): AES-256-GCM
+// when MIB_MASTER_KEY is set; the unsealed passthrough only in dev, loudly;
+// fatal anywhere else (production also fails earlier, in cfg.Validate).
+func newSealer(cfg config.Config, log *slog.Logger) (crypto.Sealer, error) {
+	if cfg.MasterKey != "" {
+		sealer, err := crypto.NewAESSealer(cfg.MasterKey)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("credential sealing: AES-256-GCM (MIB_MASTER_KEY)")
+		return sealer, nil
+	}
+	if cfg.Dev() {
+		log.Warn("!!! MIB_MASTER_KEY is not set: connector credentials will be stored UNSEALED on disk !!!")
+		log.Warn("!!! This is acceptable for local dev only — set a base64 32-byte key to enable sealing !!!")
+		return crypto.PlainSealer{}, nil
+	}
+	return nil, errors.New("MIB_MASTER_KEY is required outside dev: connector credentials must be sealed at rest (architecture.md §9.1)")
 }
 
 // seedDev ensures the out-of-the-box dev fixtures exist (architecture.md §8):

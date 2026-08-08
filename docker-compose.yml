@@ -1,0 +1,69 @@
+# MakeItBeauty self-host deployment (architecture.md §4) — Coolify or any
+# Docker Compose host. Copy .env.example to .env and fill it in; see
+# docs/deploy-coolify.md for the full walkthrough.
+#
+# Topology: web (nginx, the only public service) serves the SPA and proxies
+# /v1/ to api; api renders through renderer, which never leaves the internal
+# network; api state lives on the mib-data named volume.
+
+services:
+  renderer:
+    build:
+      context: .
+      dockerfile: deploy/docker/renderer.Dockerfile
+    restart: unless-stopped
+    # internal only: no ports are published, deliberately (architecture §4)
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7801/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false # dev runs work without one; production sets real values
+    environment:
+      MIB_DATA_DIR: /data
+      MIB_RENDERER_URL: http://renderer:7801
+    volumes:
+      - mib-data:/data
+    depends_on:
+      renderer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7800/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      # Host port 80 by default; override MIB_WEB_PORT when 80 is taken
+      # (e.g. a Coolify server, where the platform proxy owns 80/443 and
+      # routes the attached domain straight to the container).
+      - "${MIB_WEB_PORT:-80}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  # Durable API state (file-backed JSON store: users, projects, tokens,
+  # sealed connector credentials). Survives redeploys; back it up.
+  mib-data:

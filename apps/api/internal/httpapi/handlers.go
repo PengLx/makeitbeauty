@@ -111,16 +111,13 @@ func selectOutput(outputs []store.Output, id string) (store.Output, bool) {
 	return store.Output{}, false
 }
 
-// ---- POST /v1/preview (dev only) ---------------------------------------
+// ---- POST /v1/preview ---------------------------------------------------
 // The editor's live preview goes through the exact same render path as
-// production output — byte for byte (architecture.md §5).
+// production output — byte for byte (architecture.md §5). Session auth is
+// enforced by requireSession (the implicit dev user in dev-without-auth, a
+// real session everywhere else — architecture.md §4).
 
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.Dev() {
-		writeError(w, http.StatusNotFound, "not_found", "preview is only available in dev")
-		return
-	}
-
 	var req struct {
 		Design json.RawMessage `json:"design"`
 		Data   map[string]any  `json:"data"`

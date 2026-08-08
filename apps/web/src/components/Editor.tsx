@@ -7,13 +7,16 @@ import { PreviewPane } from "./PreviewPane";
 import { Inspector } from "./Inspector";
 import { DeployDialog } from "./DeployDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SessionControls } from "./SessionControls";
 import { usePreview } from "../hooks/usePreview";
 import { useKit, type KitComponent } from "../hooks/useKit";
+import { useConnectors } from "../hooks/useConnectors";
 import {
   ApiError,
   getProject,
   toApiError,
   updateProject,
+  type Me,
   type Project,
 } from "@/lib/api";
 import {
@@ -35,6 +38,7 @@ import { Separator } from "@/components/ui/separator";
 type EditorTab = "design" | "code";
 
 interface Props {
+  me: Me;
   projectId: string;
   onBack: () => void;
 }
@@ -44,7 +48,7 @@ interface Props {
  * through the canvas/inspector/code machinery, and saves with an explicit
  * PUT /v1/projects/{id} (Save button / Cmd+S) — never implicitly.
  */
-export function Editor({ projectId, onBack }: Props) {
+export function Editor({ me, projectId, onBack }: Props) {
   // Project metadata as last loaded/saved; its .design is NOT the edit state.
   const [project, setProject] = useState<Project | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
@@ -71,6 +75,9 @@ export function Editor({ projectId, onBack }: Props) {
     () => new Map(kit.components.map((c) => [c.id, c])),
     [kit.components],
   );
+  // Bindable connector fields for the inspector's insert-field picker; empty
+  // (picker hidden) when /v1/connectors is unavailable.
+  const { fields: bindingFields } = useConnectors();
 
   // Lives at the Editor level so the preview survives tab switches. Sends the
   // CURRENT project design; null (still loading) skips rendering.
@@ -303,6 +310,8 @@ export function Editor({ projectId, onBack }: Props) {
             )}
           </Button>
           {ready && <DeployDialog project={project} />}
+          <Separator orientation="vertical" className="h-4!" />
+          <SessionControls me={me} />
         </div>
       </header>
 
@@ -420,6 +429,7 @@ export function Editor({ projectId, onBack }: Props) {
                   ? kitById.get(selectedNode.component)
                   : undefined
               }
+              bindingFields={bindingFields}
               onPatch={patchNode}
             />
             <PreviewPane preview={preview} />

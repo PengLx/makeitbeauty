@@ -1,0 +1,31 @@
+# Build context filter for deploy/docker/*.Dockerfile (context = repo root).
+# Keep the context small and keep local state/artifacts out of images.
+
+# VCS / CI
+.git
+.github
+
+# dependencies (installed inside the build stages)
+**/node_modules
+
+# build artifacts (built inside the build stages)
+**/dist
+**/out
+**/*.tsbuildinfo
+apps/api/api
+
+# local env & data — never bake secrets or a dev store into an image
+.env
+.env.*
+**/*.local
+**/data
+**/coverage
+
+# fonts are fetched at image build time (renderer.Dockerfile), same as `make fonts`
+apps/renderer/fonts/*.ttf
+apps/renderer/fonts/*.otf
+
+# docs are not runtime assets
+docs
+
+.DS_Store

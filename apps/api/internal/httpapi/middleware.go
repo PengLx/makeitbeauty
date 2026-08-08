@@ -59,18 +59,22 @@ func recoverPanics(log *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// ---- CORS (dev only) ---------------------------------------------------
+// ---- CORS --------------------------------------------------------------
 
 // devCORSOrigin is the Vite dev server of apps/web. Production traffic is
-// same-site behind the BFF; permissive CORS exists only in dev.
+// same-site behind the BFF; outside dev only the MIB_PUBLIC_URL origin is
+// allowed (architecture.md §4).
 const devCORSOrigin = "http://localhost:5173"
 
-func corsDev(next http.Handler) http.Handler {
+// cors allows exactly one origin (with credentials, for the session cookie).
+// An empty origin allows nothing.
+func cors(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Origin") == devCORSOrigin {
+		if origin != "" && r.Header.Get("Origin") == origin {
 			h := w.Header()
-			h.Set("Access-Control-Allow-Origin", devCORSOrigin)
+			h.Set("Access-Control-Allow-Origin", origin)
 			h.Add("Vary", "Origin")
+			h.Set("Access-Control-Allow-Credentials", "true")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			h.Set("Access-Control-Max-Age", "600")
@@ -141,26 +145,46 @@ func (s *Server) requireDeployToken(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ---- session stub ------------------------------------------------------
+// ---- session auth ------------------------------------------------------
 
-// devUserID is the single implicit user of the dev environment. Real session
-// auth (GitHub App sign-in + session cookie via the BFF) replaces this.
+// devUserID is the single implicit user of the dev-without-auth environment
+// (dev and no MIB_GITHUB_CLIENT_ID): the zero-setup path stays exactly as it
+// was before real sessions existed.
 const devUserID = "dev"
 
 type ctxKey int
 
 const ctxKeyUserID ctxKey = iota
 
-// requireSession injects the authenticated user into the request context.
-// Dev: everyone is the implicit dev user. Non-dev: sessions are not
-// implemented in the scaffold, so requests are rejected.
+// resolveSession authenticates a request: the mib_session cookie against the
+// server-side session store first, then the implicit dev user as the
+// dev-without-auth fallback. devFallback reports which path matched so
+// /v1/me can flag `dev: true`.
+func (s *Server) resolveSession(r *http.Request) (uid string, devFallback, ok bool) {
+	if s.sessions != nil {
+		if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+			sess, err := s.sessions.Get(r.Context(), c.Value)
+			if err == nil && !sess.Expired(time.Now()) {
+				return sess.UserID, false, true
+			}
+		}
+	}
+	if s.cfg.Dev() && s.cfg.GitHubClientID == "" {
+		return devUserID, true, true
+	}
+	return "", false, false
+}
+
+// requireSession injects the authenticated user into the request context and
+// rejects everyone else with a 401 envelope.
 func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.cfg.Dev() {
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "session auth is not available in this build")
+		uid, _, ok := s.resolveSession(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthenticated", "sign in at /v1/auth/github/login")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), ctxKeyUserID, devUserID)))
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxKeyUserID, uid)))
 	}
 }
 

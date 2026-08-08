@@ -20,10 +20,10 @@ func testConfig() config.Config { return config.Config{Env: "test"} }
 // array response, cache header (architecture.md §8).
 func TestHandleKitHTTP(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewServer(testConfig(), log, store.NewMemory(), nil, nil, nil, []kit.Component{
+	s := NewServer(testConfig(), log, Deps{Stores: store.NewMemory(), Kit: []kit.Component{
 		{ID: "kit/progress-bar", Title: "Progress bar", Frame: kit.Frame{W: 260, H: 32}, Props: json.RawMessage(`{}`)},
 		{ID: "kit/stat-card", Title: "Stat card", Description: "A headline metric.", Frame: kit.Frame{W: 260, H: 140}, Props: json.RawMessage(`{"label":{"type":"string"}}`)},
-	})
+	}})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/kit", nil) // no Authorization header
 	rec := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestHandleKitHTTP(t *testing.T) {
 // A server with no kit components must serve [] — never null.
 func TestHandleKitEmpty(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewServer(testConfig(), log, store.NewMemory(), nil, nil, nil, nil)
+	s := NewServer(testConfig(), log, Deps{Stores: store.NewMemory()})
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/kit", nil))

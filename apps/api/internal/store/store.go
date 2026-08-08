@@ -14,16 +14,21 @@ import (
 // ErrNotFound is returned by Get-style methods when no row matches.
 var ErrNotFound = errors.New("store: not found")
 
-// User is an account holder (data model v0, architecture.md §7).
+// User is an account holder (data model v0, architecture.md §7). GitHub-born
+// users are keyed on the immutable numeric GitHub id (logins can change);
+// GitHubID stays 0 for the implicit dev user.
 type User struct {
 	ID          string    `json:"id"`
 	Login       string    `json:"login"`
 	DisplayName string    `json:"displayName"`
+	AvatarURL   string    `json:"avatarUrl,omitempty"`
+	GitHubID    int64     `json:"githubId,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
-// ConnectorAccount is a user-level connector configuration. Credentials are
-// stored envelope-encrypted; this scaffold never populates them.
+// ConnectorAccount is a user-level connector configuration.
+// EncryptedCredentials is a crypto.Sealer-sealed JSON blob (the GitHub shape
+// is auth.Credentials); it is empty for auth:none connectors and the dev seed.
 type ConnectorAccount struct {
 	ID                   string
 	UserID               string
@@ -82,6 +87,13 @@ func HashToken(token string) [sha256.Size]byte {
 type Users interface {
 	Create(ctx context.Context, u *User) error
 	Get(ctx context.Context, id string) (*User, error)
+	// GetByGitHubID resolves the user owning a GitHub identity — the upsert
+	// key of the OAuth callback. githubID 0 (users without a GitHub identity)
+	// is never matched.
+	GetByGitHubID(ctx context.Context, githubID int64) (*User, error)
+	// Update replaces the stored user with u (matched by u.ID).
+	// Returns ErrNotFound if no such user exists.
+	Update(ctx context.Context, u *User) error
 }
 
 // Projects persists image projects.
@@ -114,6 +126,10 @@ type DeployTokens interface {
 type ConnectorAccounts interface {
 	Create(ctx context.Context, a *ConnectorAccount) error
 	GetByUserConnector(ctx context.Context, userID, connector string) (*ConnectorAccount, error)
+	// Update replaces the stored account with a (matched by UserID+Connector,
+	// the natural key): resealed credentials after a token refresh, status
+	// flips to "expired". Returns ErrNotFound if no such account exists.
+	Update(ctx context.Context, a *ConnectorAccount) error
 }
 
 // Stores bundles all persistence interfaces for wiring.

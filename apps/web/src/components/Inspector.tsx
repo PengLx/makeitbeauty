@@ -11,6 +11,7 @@ import {
   type TextNode,
 } from "@/lib/design";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
+import type { ConnectorField } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,11 +30,13 @@ interface Props {
   node: DesignNode | null;
   /** Kit metadata for the selected instance node's component, if loaded. */
   kit: KitComponent | undefined;
+  /** Bindable connector fields; empty hides the text insert-field picker. */
+  bindingFields: ConnectorField[];
   onPatch: (id: string, patch: Partial<DesignNode>) => void;
 }
 
 /** Right-column property editor for the selected node. */
-export function Inspector({ node, kit, onPatch }: Props) {
+export function Inspector({ node, kit, bindingFields, onPatch }: Props) {
   if (!node) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -78,7 +81,7 @@ export function Inspector({ node, kit, onPatch }: Props) {
       </Section>
 
       <Separator />
-      <TypeSection node={node} kit={kit} patch={patch} />
+      <TypeSection node={node} kit={kit} bindingFields={bindingFields} patch={patch} />
       <Separator />
       <AnimationSection node={node} patch={patch} />
     </div>
@@ -88,15 +91,17 @@ export function Inspector({ node, kit, onPatch }: Props) {
 function TypeSection({
   node,
   kit,
+  bindingFields,
   patch,
 }: {
   node: DesignNode;
   kit: KitComponent | undefined;
+  bindingFields: ConnectorField[];
   patch: (p: Partial<DesignNode>) => void;
 }) {
   switch (node.type) {
     case "text":
-      return <TextSection node={node} patch={patch} />;
+      return <TextSection node={node} bindingFields={bindingFields} patch={patch} />;
     case "rect":
       return <RectSection node={node} patch={patch} />;
     case "image":
@@ -124,7 +129,15 @@ function TypeSection({
   }
 }
 
-function TextSection({ node, patch }: { node: TextNode; patch: (p: Partial<DesignNode>) => void }) {
+function TextSection({
+  node,
+  bindingFields,
+  patch,
+}: {
+  node: TextNode;
+  bindingFields: ConnectorField[];
+  patch: (p: Partial<DesignNode>) => void;
+}) {
   const s = node.style ?? {};
   const setStyle = (next: Partial<TextNode["style"]>) =>
     patch({ style: { ...s, ...next } });
@@ -140,6 +153,28 @@ function TextSection({ node, patch }: { node: TextNode; patch: (p: Partial<Desig
           onChange={(e) => patch({ text: e.target.value })}
         />
       </Field>
+      {bindingFields.length > 0 && (
+        <Field label="Insert field">
+          {/* value stays "" so the trigger always shows the placeholder;
+              selecting appends the {{path}} template to the content (v0:
+              end-of-text, not cursor position). */}
+          <Select
+            value=""
+            onValueChange={(path) => patch({ text: `${node.text}{{${path}}}` })}
+          >
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue placeholder="Bind connector data…" />
+            </SelectTrigger>
+            <SelectContent>
+              {bindingFields.map((f) => (
+                <SelectItem key={f.path} value={f.path} title={f.description}>
+                  <span className="font-mono text-xs">{f.path}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <NumberField
           label="Size"

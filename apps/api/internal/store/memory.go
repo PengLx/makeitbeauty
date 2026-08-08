@@ -40,6 +40,32 @@ func (s *memUsers) Get(_ context.Context, id string) (*User, error) {
 	return &cp, nil
 }
 
+func (s *memUsers) GetByGitHubID(_ context.Context, githubID int64) (*User, error) {
+	if githubID == 0 {
+		return nil, ErrNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.m {
+		if u.GitHubID == githubID {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *memUsers) Update(_ context.Context, u *User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[u.ID]; !ok {
+		return ErrNotFound
+	}
+	cp := *u
+	s.m[u.ID] = &cp
+	return nil
+}
+
 type memProjects struct {
 	mu sync.RWMutex
 	m  map[string]*Project
@@ -162,4 +188,16 @@ func (s *memConnectorAccounts) GetByUserConnector(_ context.Context, userID, con
 	}
 	cp := *a
 	return &cp, nil
+}
+
+func (s *memConnectorAccounts) Update(_ context.Context, a *ConnectorAccount) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := accountKey(a.UserID, a.Connector)
+	if _, ok := s.m[key]; !ok {
+		return ErrNotFound
+	}
+	cp := *a
+	s.m[key] = &cp
+	return nil
 }

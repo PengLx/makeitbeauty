@@ -7,6 +7,7 @@ import {
   deleteProject,
   listProjects,
   toApiError,
+  type Me,
   type Project,
 } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
@@ -31,9 +32,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SessionControls } from "./SessionControls";
 
 interface Props {
+  me: Me;
   onOpen: (projectId: string) => void;
 }
 
@@ -41,7 +45,7 @@ interface Props {
  * Home view: card grid over GET /v1/projects with create (dialog → POST) and
  * delete (confirm → DELETE). Clicking a card opens it in the editor.
  */
-export function ProjectList({ onOpen }: Props) {
+export function ProjectList({ me, onOpen }: Props) {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [listError, setListError] = useState<ApiError | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -121,11 +125,13 @@ export function ProjectList({ onOpen }: Props) {
         <span className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
           projects
         </span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={openCreate}>
             <Plus data-icon="inline-start" />
             New project
           </Button>
+          <Separator orientation="vertical" className="h-4!" />
+          <SessionControls me={me} />
         </div>
       </header>
 

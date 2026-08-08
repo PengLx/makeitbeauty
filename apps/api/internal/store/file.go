@@ -276,6 +276,32 @@ func (s *fileUsers) Get(_ context.Context, id string) (*User, error) {
 	return &cp, nil
 }
 
+func (s *fileUsers) GetByGitHubID(_ context.Context, githubID int64) (*User, error) {
+	if githubID == 0 {
+		return nil, ErrNotFound
+	}
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	for _, u := range s.db.users {
+		if u.GitHubID == githubID {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *fileUsers) Update(_ context.Context, u *User) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	if _, ok := s.db.users[u.ID]; !ok {
+		return ErrNotFound
+	}
+	cp := *u
+	s.db.users[u.ID] = &cp
+	return s.db.persistUsers()
+}
+
 type fileProjects struct{ db *fileDB }
 
 func (s *fileProjects) Create(_ context.Context, p *Project) error {
@@ -388,4 +414,16 @@ func (s *fileConnectorAccounts) GetByUserConnector(_ context.Context, userID, co
 	}
 	cp := *a
 	return &cp, nil
+}
+
+func (s *fileConnectorAccounts) Update(_ context.Context, a *ConnectorAccount) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	key := accountKey(a.UserID, a.Connector)
+	if _, ok := s.db.accounts[key]; !ok {
+		return ErrNotFound
+	}
+	cp := *a
+	s.db.accounts[key] = &cp
+	return s.db.persistAccounts()
 }

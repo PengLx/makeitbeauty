@@ -10,6 +10,7 @@ apps/api/api
 # env & local
 .env
 .env.*
+!.env.example
 *.local
 
 # fonts are fetched at setup, not committed

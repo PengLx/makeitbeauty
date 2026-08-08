@@ -121,6 +121,61 @@ function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   });
 }
 
+// ---- session & connectors (architecture §8) -----------------------------
+
+/** Signed-in user, per the §7 data model (avatarUrl is an optional extra). */
+export interface User {
+  id: string;
+  login: string;
+  displayName?: string;
+  avatarUrl?: string;
+}
+
+export interface ConnectorSummary {
+  connector: string;
+  status: ConnectorStatus;
+}
+
+/** GET /v1/me body; `dev` flags the MIB_ENV=dev implicit-user fallback. */
+export interface Me {
+  user: User;
+  connectors: ConnectorSummary[];
+  dev?: boolean;
+}
+
+export type ConnectorStatus = "connected" | "unconfigured" | "expired";
+
+/** One bindable snapshot field, e.g. {path: "github.followers", …}. */
+export interface ConnectorField {
+  path: string;
+  description?: string;
+}
+
+export interface ConnectorInfo {
+  connector: string;
+  status: ConnectorStatus;
+  fields: ConnectorField[];
+}
+
+/** Resolves the session (or throws ApiError with status 401 when signed out). */
+export function getMe(signal?: AbortSignal): Promise<Me> {
+  return request("/v1/me", { signal });
+}
+
+export function logout(): Promise<void> {
+  return send("POST", "/v1/auth/logout");
+}
+
+export async function listConnectors(
+  signal?: AbortSignal,
+): Promise<ConnectorInfo[]> {
+  const body = await request<{ connectors?: ConnectorInfo[] } | ConnectorInfo[]>(
+    "/v1/connectors",
+    { signal },
+  );
+  return Array.isArray(body) ? body : (body.connectors ?? []);
+}
+
 // ---- project CRUD (architecture §8) -------------------------------------
 
 export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
