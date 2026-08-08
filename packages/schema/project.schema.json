@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://makeitbeauty.dev/schemas/project.v0.json",
+  "title": "MakeItBeauty image project (v0)",
+  "description": "A user-owned image project: one design, its connector bindings, and one or more render outputs. Credentials live on user-level ConnectorAccounts; a project only references them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "design", "bindings", "outputs"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "name": { "type": "string", "maxLength": 200 },
+    "design": { "$ref": "./design.schema.json" },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["connector", "fields"],
+        "properties": {
+          "connector": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "accountId": {
+            "type": "string",
+            "description": "ConnectorAccount id. Omitted in dev/fixtures (resolved to the user's default account)."
+          },
+          "fields": {
+            "type": "array",
+            "description": "Snapshot field paths this project consumes; also drives the publish-consent UI (\"this image will publicly display: ...\").",
+            "items": { "type": "string", "pattern": "^[a-zA-Z0-9_.]+$" },
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "filename"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+          "theme": { "enum": ["auto", "light", "dark"], "default": "auto" },
+          "format": { "const": "svg", "default": "svg" },
+          "filename": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+\\.svg$" }
+        }
+      }
+    }
+  }
+}

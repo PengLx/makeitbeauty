@@ -1,0 +1,59 @@
+{
+  "id": "progress-bar",
+  "title": "Progress bar",
+  "frame": { "w": 480, "h": 72 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "What the bar measures, e.g. a language name.",
+      "default": "TypeScript"
+    },
+    "percent": {
+      "type": "number",
+      "description": "Fill percentage, 0–100. Drives the fill width via computed geometry.",
+      "default": 70
+    },
+    "color": {
+      "type": "color",
+      "description": "Fill color of the bar.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 480, "h": 72,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 16, "w": 300, "h": 20,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 14, "fontWeight": 600, "color": "#e6edf3" }
+    },
+    {
+      "id": "value",
+      "type": "text",
+      "x": 340, "y": 17, "w": 120, "h": 18,
+      "text": "{{props.percent}}%",
+      "style": { "fontSize": 13, "fontWeight": 500, "color": "#7d8590", "align": "right" }
+    },
+    {
+      "id": "track",
+      "type": "rect",
+      "x": 20, "y": 46, "w": 440, "h": 8,
+      "style": { "fill": "#21262d", "radius": 4 }
+    },
+    {
+      "id": "fill",
+      "type": "rect",
+      "x": 20, "y": 46, "w": 308, "h": 8,
+      "style": { "fill": "{{props.color}}", "radius": 4 }
+    }
+  ],
+  "computed": [
+    { "node": "fill", "field": "w", "prop": "percent", "scale": 4.4, "clamp": [0, 440] }
+  ]
+}

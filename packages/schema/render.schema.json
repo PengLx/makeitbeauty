@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://makeitbeauty.dev/schemas/render.v0.json",
+  "title": "Internal render API contract (v0)",
+  "description": "Contract between apps/api (Go) and apps/renderer (Node). POST /internal/render. The renderer is a pure function: (design, data, options) -> SVG. It is never exposed publicly.",
+  "type": "object",
+  "$defs": {
+    "renderRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["design", "data"],
+      "properties": {
+        "design": { "$ref": "./design.schema.json" },
+        "data": {
+          "type": "object",
+          "description": "Merged connector snapshots keyed by connector name, e.g. {\"github\": {...}}. Template paths in the design resolve against this object. Already filtered to bound fields by the API — the renderer never sees credentials or unbound data."
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "theme": { "enum": ["auto", "light", "dark"], "default": "auto" }
+          }
+        }
+      }
+    },
+    "renderResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["svg", "warnings"],
+      "properties": {
+        "svg": { "type": "string", "description": "Self-contained, sanitized, Camo-safe SVG. Deterministic for identical input." },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Non-fatal issues, e.g. unresolved template paths."
+        }
+      }
+    },
+    "errorResponse": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

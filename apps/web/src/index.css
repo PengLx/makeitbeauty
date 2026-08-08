@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/* GitHub-dark base. Component-level styling uses Tailwind utilities;
+   only global ground-truth colors live here. */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #0d1117;
+  color: #e6edf3;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+    Helvetica, Arial, sans-serif;
+}

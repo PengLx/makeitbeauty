@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://makeitbeauty.dev/schemas/design.v0.json",
+  "title": "MakeItBeauty design document (v0)",
+  "description": "A renderable card design. Nodes are absolutely positioned on the canvas. Text properties support {{path.to.field}} templates resolved against the connector data snapshot at render time. Everything must stay inside the Camo-safe subset: no external URLs anywhere (data: URIs only), animation via presets that compile to inline CSS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "canvas", "nodes"],
+  "properties": {
+    "version": { "const": 0 },
+    "name": { "type": "string", "maxLength": 200 },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "background": { "$ref": "#/$defs/color" },
+        "radius": { "type": "number", "minimum": 0 }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "maxItems": 512,
+      "items": { "$ref": "#/$defs/node" }
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "description": "CSS color value. url() and external references are forbidden.",
+      "pattern": "^(?!.*url\\().*$"
+    },
+    "template": {
+      "type": "string",
+      "description": "Literal text with optional {{path.to.field}} substitutions.",
+      "maxLength": 2000
+    },
+    "animation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset"],
+      "properties": {
+        "preset": { "enum": ["fadeIn", "pulse", "float"] },
+        "delayMs": { "type": "integer", "minimum": 0, "maximum": 60000, "default": 0 },
+        "durationMs": { "type": "integer", "minimum": 1, "maximum": 60000, "default": 800 },
+        "loop": { "type": "boolean", "default": false }
+      }
+    },
+    "nodeBase": {
+      "type": "object",
+      "required": ["id", "type", "x", "y", "w", "h"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$" },
+        "type": { "enum": ["text", "rect", "image", "instance"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number", "minimum": 0 },
+        "h": { "type": "number", "minimum": 0 },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rotation": { "type": "number", "minimum": -360, "maximum": 360 },
+        "animation": { "$ref": "#/$defs/animation" }
+      }
+    },
+    "node": {
+      "oneOf": [
+        { "$ref": "#/$defs/textNode" },
+        { "$ref": "#/$defs/rectNode" },
+        { "$ref": "#/$defs/imageNode" },
+        { "$ref": "#/$defs/instanceNode" }
+      ]
+    },
+    "textNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "$ref": "#/$defs/template" },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fontFamily": { "type": "string" },
+            "fontSize": { "type": "number", "minimum": 1, "maximum": 512 },
+            "fontWeight": { "enum": [100, 200, 300, 400, 500, 600, 700, 800, 900] },
+            "color": { "$ref": "#/$defs/color" },
+            "align": { "enum": ["left", "center", "right"] },
+            "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 4 },
+            "letterSpacing": { "type": "number" }
+          }
+        }
+      },
+      "required": ["text"],
+      "unevaluatedProperties": false
+    },
+    "rectNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }],
+      "properties": {
+        "type": { "const": "rect" },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fill": { "$ref": "#/$defs/color" },
+            "radius": { "type": "number", "minimum": 0 },
+            "stroke": { "$ref": "#/$defs/color" },
+            "strokeWidth": { "type": "number", "minimum": 0 }
+          }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "imageNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }],
+      "properties": {
+        "type": { "const": "image" },
+        "src": {
+          "type": "string",
+          "description": "data: URI only — external image URLs are forbidden in exports.",
+          "pattern": "^data:image/(png|jpeg|webp|svg\\+xml);base64,"
+        },
+        "fit": { "enum": ["contain", "cover", "fill"], "default": "cover" },
+        "radius": { "type": "number", "minimum": 0 }
+      },
+      "required": ["src"],
+      "unevaluatedProperties": false
+    },
+    "instanceNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }],
+      "properties": {
+        "type": { "const": "instance" },
+        "component": {
+          "type": "string",
+          "description": "Kit component id, e.g. \"kit/stat-card\".",
+          "pattern": "^[a-z0-9-]+/[a-z0-9-]+$"
+        },
+        "props": { "type": "object" }
+      },
+      "required": ["component"],
+      "unevaluatedProperties": false
+    }
+  }
+}

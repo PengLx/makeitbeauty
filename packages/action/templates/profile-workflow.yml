@@ -1,0 +1,102 @@
+# MakeItBeauty — profile refresh workflow
+#
+# Copy this file to .github/workflows/makeitbeauty.yml in your profile repo
+# (the repo named after your username), then add the MAKEITBEAUTY_DEPLOY_TOKEN
+# secret (Settings → Secrets and variables → Actions).
+#
+# KEEPALIVE NOTE: GitHub automatically disables scheduled workflows after
+# ~60 days without repo activity. Any commit (or re-enabling the workflow in
+# the Actions tab) resets the clock. If your profile repo is otherwise
+# untouched, drop by every couple of months — or push any small change.
+
+name: Refresh MakeItBeauty images
+
+on:
+  schedule:
+    # 03:17 UTC daily. Deliberately off-the-hour: GitHub queues on-the-hour
+    # crons behind everyone else's, causing long delays or dropped runs.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+  push:
+    paths:
+      - ".makeitbeauty/**"
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    strategy:
+      # Render each project/output pair. Add or remove rows as needed.
+      matrix:
+        include:
+          - project: my-profile-card
+            output: default
+            path: assets/card.svg
+          - project: my-stats
+            output: dark
+            path: assets/stats.svg
+      # Keep going if one project fails — the others still refresh.
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render ${{ matrix.project }}
+        uses: makeitbeauty/action@v0
+        with:
+          project: ${{ matrix.project }}
+          deploy-token: ${{ secrets.MAKEITBEAUTY_DEPLOY_TOKEN }}
+          output: ${{ matrix.output }}
+          path: ${{ matrix.path }}
+
+      - name: Upload rendered image
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-${{ matrix.project }}-${{ matrix.output }}
+          path: ${{ matrix.path }}
+
+  commit:
+    needs: render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect rendered images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rendered-*
+          merge-multiple: true
+          path: rendered
+
+      - name: Commit to output branch
+        # The output branch is kept at a SINGLE forced commit: an orphan
+        # checkout means no history accumulates, the repo never bloats, and
+        # bot commits never pollute your default branch or contribution graph.
+        # Renders are deterministic (same design + data = byte-identical SVG),
+        # so we skip the push entirely when nothing changed.
+        run: |
+          set -euo pipefail
+          # actions/checkout is shallow; fetch the current output branch (if
+          # any) so the no-change comparison below has something to diff.
+          git fetch --depth=1 origin output || true
+          git checkout --orphan output
+          git rm -rf --quiet .
+          cp -r rendered/. .
+          rm -rf rendered
+          git add -A
+          if git diff --quiet "origin/output" -- 2>/dev/null; then
+            echo "No changes — skipping commit."
+            exit 0
+          fi
+          git -c user.name="makeitbeauty[bot]" \
+              -c user.email="bot@makeitbeauty.dev" \
+              commit -m "render: refresh images"
+          git push --force origin output
+
+# README embed snippet — reference the output branch through
+# raw.githubusercontent.com (Camo caches it with max-age=300, so updates
+# appear within ~5 minutes of a run):
+#
+#   <img src="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_USERNAME/output/assets/card.svg"
+#        alt="Profile card" />

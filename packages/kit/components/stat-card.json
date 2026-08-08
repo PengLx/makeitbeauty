@@ -1,0 +1,62 @@
+{
+  "id": "stat-card",
+  "title": "Stat card",
+  "frame": { "w": 260, "h": 140 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the value.",
+      "default": "FOLLOWERS"
+    },
+    "value": {
+      "type": "string",
+      "description": "The headline metric. Bind it, e.g. {{github.user.followers}}.",
+      "default": "1,234"
+    },
+    "caption": {
+      "type": "string",
+      "description": "Secondary line under the value (trend, unit, context).",
+      "default": "+12 this week"
+    },
+    "accent": {
+      "type": "color",
+      "description": "Accent color for the caption and underline tick.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 260, "h": 140,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 20, "w": 220, "h": 18,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "value",
+      "type": "text",
+      "x": 20, "y": 44, "w": 220, "h": 42,
+      "text": "{{props.value}}",
+      "style": { "fontSize": 34, "fontWeight": 700, "color": "#e6edf3" }
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "x": 20, "y": 94, "w": 220, "h": 18,
+      "text": "{{props.caption}}",
+      "style": { "fontSize": 13, "fontWeight": 500, "color": "{{props.accent}}" }
+    },
+    {
+      "id": "tick",
+      "type": "rect",
+      "x": 20, "y": 120, "w": 32, "h": 4,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    }
+  ]
+}

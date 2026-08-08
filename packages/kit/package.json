@@ -1,0 +1,11 @@
+{
+  "name": "@makeitbeauty/kit",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Official MakeItBeauty component kit (v0): declarative design fragments with declared props, consumed as instance nodes.",
+  "files": [
+    "components/stat-card.json",
+    "components/text-banner.json",
+    "components/progress-bar.json"
+  ]
+}

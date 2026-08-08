@@ -1,0 +1,78 @@
+name: "MakeItBeauty Render"
+description: >-
+  Pull a freshly rendered SVG for a MakeItBeauty project and replace the local
+  file only after validating the response. Fails soft: on any error the
+  existing file is left untouched, so the previously committed image keeps
+  displaying.
+author: "MakeItBeauty"
+
+branding:
+  icon: "image"
+  color: "blue"
+
+inputs:
+  api-url:
+    description: "Base URL of the MakeItBeauty API."
+    required: false
+    default: "https://api.makeitbeauty.dev"
+  project:
+    description: "Project id to render."
+    required: true
+  deploy-token:
+    description: "Per-project deploy token (store as a repo secret). Pull-only; renders the project, nothing else."
+    required: true
+  output:
+    description: "Output id within the project."
+    required: false
+    default: "default"
+  path:
+    description: "Repo-relative path to write the SVG to, e.g. assets/card.svg."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Render and safely replace
+      shell: bash
+      env:
+        MIB_API_URL: ${{ inputs.api-url }}
+        MIB_PROJECT: ${{ inputs.project }}
+        MIB_DEPLOY_TOKEN: ${{ inputs.deploy-token }}
+        MIB_OUTPUT: ${{ inputs.output }}
+        MIB_PATH: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+
+        # Render into a temp file first. The committed file is only ever
+        # replaced after the response is validated — this is the fail-soft
+        # contract: a broken API run leaves the profile stale, never broken.
+        tmp="$(mktemp --suffix=.svg)"
+        trap 'rm -f "$tmp"' EXIT
+
+        url="${MIB_API_URL%/}/v1/projects/${MIB_PROJECT}/render?output=${MIB_OUTPUT}"
+        echo "Rendering ${MIB_PROJECT}/${MIB_OUTPUT} from ${MIB_API_URL%/}"
+
+        # --fail makes curl exit non-zero on HTTP >= 400 (the API returns
+        # non-200 on render failures precisely so this trips).
+        curl --fail --silent --show-error \
+          --retry 3 --retry-delay 5 --max-time 60 \
+          -X POST \
+          -H "Authorization: Bearer ${MIB_DEPLOY_TOKEN}" \
+          -o "$tmp" \
+          "$url"
+
+        # Validate: non-empty and actually an SVG document. A JSON error
+        # envelope or truncated body must never overwrite the good file.
+        if [ ! -s "$tmp" ]; then
+          echo "::error::Empty response from API — keeping existing ${MIB_PATH}"
+          exit 1
+        fi
+        if ! head -c 4 "$tmp" | grep -q '^<svg'; then
+          echo "::error::Response is not an SVG document — keeping existing ${MIB_PATH}"
+          exit 1
+        fi
+
+        mkdir -p "$(dirname "$MIB_PATH")"
+        mv "$tmp" "$MIB_PATH"
+        trap - EXIT
+        echo "Wrote $(wc -c < "$MIB_PATH") bytes to ${MIB_PATH}"

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://makeitbeauty.dev/schemas/connector-manifest.v0.json",
+  "title": "MakeItBeauty connector manifest (v0)",
+  "description": "Declares a data connector: how it authenticates, what snapshot shape it produces, and how often snapshots refresh. Connectors are trusted code shipped via reviewed PRs — unlike (future) community components, which are sandboxed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "title", "auth", "snapshotTtlSeconds", "snapshotSchema"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64 },
+    "title": { "type": "string", "maxLength": 100 },
+    "description": { "type": "string", "maxLength": 500 },
+    "auth": {
+      "enum": ["none", "api_key", "oauth_pkce", "oauth_confidential"],
+      "description": "none: public API. api_key: user pastes a key once. oauth_pkce: public-client OAuth (preferred). oauth_confidential: requires our client secret — add sparingly, each one expands the vault."
+    },
+    "scopes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Upstream scopes requested; keep minimal. Shown verbatim on the connect-consent screen."
+    },
+    "snapshotTtlSeconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 604800,
+      "description": "Snapshot cache TTL. Served stale-while-revalidate: an upstream failure never fails a render."
+    },
+    "snapshotSchema": {
+      "type": "object",
+      "description": "JSON Schema of the snapshot this connector produces. Prefer the normalized shapes (timeseries, counter, item_list, profile) so components stay portable across connectors."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "github": {
+    "user": {
+      "name": "Ada Lovelace",
+      "login": "ada",
+      "followers": 1234
+    },
+    "stats": {
+      "totalStars": 5678,
+      "topLanguage": "TypeScript"
+    }
+  }
+}

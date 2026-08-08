@@ -1,0 +1,12 @@
+{
+  "name": "@makeitbeauty/schema",
+  "version": "0.0.1",
+  "private": true,
+  "description": "JSON Schemas shared across MakeItBeauty services: design document, project, connector manifest, internal render API.",
+  "files": [
+    "design.schema.json",
+    "project.schema.json",
+    "connector-manifest.schema.json",
+    "render.schema.json"
+  ]
+}

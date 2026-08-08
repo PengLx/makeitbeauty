@@ -1,0 +1,48 @@
+{
+  "version": 0,
+  "name": "Demo profile card",
+  "canvas": { "width": 800, "height": 260, "background": "#0d1117", "radius": 16 },
+  "nodes": [
+    {
+      "id": "accent",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 6, "h": 260,
+      "style": { "fill": "#58a6ff" },
+      "animation": { "preset": "fadeIn", "durationMs": 900 }
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "x": 32, "y": 36, "w": 640, "h": 44,
+      "text": "Hi, I'm {{github.user.name}}",
+      "style": { "fontSize": 30, "fontWeight": 700, "color": "#e6edf3" }
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "x": 32, "y": 92, "w": 640, "h": 28,
+      "text": "@{{github.user.login}} · {{github.user.followers}} followers · {{github.stats.totalStars}} stars",
+      "style": { "fontSize": 17, "fontWeight": 400, "color": "#7d8590" }
+    },
+    {
+      "id": "divider",
+      "type": "rect",
+      "x": 32, "y": 140, "w": 736, "h": 2,
+      "style": { "fill": "#21262d" }
+    },
+    {
+      "id": "langs",
+      "type": "text",
+      "x": 32, "y": 168, "w": 640, "h": 28,
+      "text": "Top language: {{github.stats.topLanguage}}",
+      "style": { "fontSize": 17, "fontWeight": 500, "color": "#e6edf3" }
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "x": 32, "y": 210, "w": 640, "h": 24,
+      "text": "made with MakeItBeauty",
+      "style": { "fontSize": 13, "fontWeight": 400, "color": "#484f58" }
+    }
+  ]
+}

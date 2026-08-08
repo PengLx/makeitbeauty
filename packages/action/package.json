@@ -1,0 +1,10 @@
+{
+  "name": "@makeitbeauty/action",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Composite GitHub Action: pulls rendered SVGs from the MakeItBeauty API with safe file replacement (fail-soft). YAML + docs only; no JS build.",
+  "files": [
+    "action.yml",
+    "templates/profile-workflow.yml"
+  ]
+}

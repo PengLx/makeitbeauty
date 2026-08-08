@@ -1,0 +1,21 @@
+# deps
+node_modules/
+
+# build output
+dist/
+out/
+apps/api/api
+*.tsbuildinfo
+
+# env & local
+.env
+.env.*
+*.local
+
+# fonts are fetched at setup, not committed
+apps/renderer/fonts/*.ttf
+apps/renderer/fonts/*.otf
+
+# misc
+coverage/
+.DS_Store

@@ -1,0 +1,50 @@
+{
+  "id": "text-banner",
+  "title": "Text banner",
+  "frame": { "w": 720, "h": 120 },
+  "props": {
+    "title": {
+      "type": "string",
+      "description": "Main line, e.g. a greeting. Bind it, e.g. Hi, I'm {{github.user.name}}.",
+      "default": "Hi, I'm Ada Lovelace"
+    },
+    "subtitle": {
+      "type": "string",
+      "description": "Secondary line under the title.",
+      "default": "Turning data into designed pixels"
+    },
+    "accent": {
+      "type": "color",
+      "description": "Color of the vertical accent tick.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 720, "h": 120,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "tick",
+      "type": "rect",
+      "x": 20, "y": 30, "w": 4, "h": 60,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "x": 44, "y": 28, "w": 640, "h": 32,
+      "text": "{{props.title}}",
+      "style": { "fontSize": 24, "fontWeight": 700, "color": "#e6edf3" }
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "x": 44, "y": 68, "w": 640, "h": 24,
+      "text": "{{props.subtitle}}",
+      "style": { "fontSize": 15, "fontWeight": 400, "color": "#7d8590" }
+    }
+  ]
+}
