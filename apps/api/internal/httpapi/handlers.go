@@ -1,12 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/connector"
@@ -163,26 +164,44 @@ func (s *Server) renderAndReply(w http.ResponseWriter, r *http.Request, design j
 
 // ---- project CRUD (session auth, stubbed) ------------------------------
 
-var projectIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+// blankDesign is the default design of a project created without one: a
+// small empty canvas, valid per design.schema.json, ready for the editor.
+const blankDesign = `{"version":0,"canvas":{"width":600,"height":240,"background":"#0d1117","radius":8},"nodes":[]}`
+
+// projectWriteRequest is the body of POST /v1/projects and
+// PUT /v1/projects/{id}. Decoded strictly: unknown fields are a 400.
+type projectWriteRequest struct {
+	ID       string          `json:"id"` // POST only; rejected on PUT
+	Name     string          `json:"name"`
+	Design   json.RawMessage `json:"design"`
+	Bindings []store.Binding `json:"bindings"`
+	Outputs  []store.Output  `json:"outputs"`
+}
+
+func decodeProjectWrite(w http.ResponseWriter, r *http.Request, req *projectWriteRequest) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", decodeErrorMessage(err))
+		return false
+	}
+	return true
+}
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID       string          `json:"id"`
-		Name     string          `json:"name"`
-		Design   json.RawMessage `json:"design"`
-		Bindings []store.Binding `json:"bindings"`
-		Outputs  []store.Output  `json:"outputs"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "body must be JSON: {id?, name, design, bindings?, outputs?}")
+	var req projectWriteRequest
+	if !decodeProjectWrite(w, r, &req) {
 		return
 	}
-	if req.Name == "" || len(req.Design) == 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "name and design are required")
+	if err := validateName(req.Name); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
+	}
+	if len(req.Design) == 0 {
+		req.Design = json.RawMessage(blankDesign)
 	}
 	if req.ID == "" {
-		req.ID = randomID()
+		req.ID = s.uniqueProjectID(r.Context(), slugify(req.Name))
 	}
 	if !projectIDPattern.MatchString(req.ID) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "id must match ^[a-z0-9][a-z0-9-]{0,63}$")
@@ -197,6 +216,14 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Outputs) == 0 {
 		req.Outputs = []store.Output{{ID: "default", Filename: "card.svg"}}
+	}
+	if err := validateBindings(req.Bindings); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := validateOutputs(req.Outputs); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
 	}
 
 	now := time.Now().UTC()
@@ -215,6 +242,113 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, project)
+}
+
+func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.ownedProject(w, r)
+	if !ok {
+		return
+	}
+
+	var req projectWriteRequest
+	if !decodeProjectWrite(w, r, &req) {
+		return
+	}
+	if req.ID != "" && req.ID != project.ID {
+		writeError(w, http.StatusBadRequest, "invalid_request", "id cannot be changed; omit it or repeat the current id")
+		return
+	}
+	if err := validateName(req.Name); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if len(req.Design) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "design is required")
+		return
+	}
+	// Omitted bindings/outputs keep their stored values; provided ones
+	// replace them and must satisfy the schema constraints.
+	if req.Bindings == nil {
+		req.Bindings = project.Bindings
+	}
+	if req.Outputs == nil {
+		req.Outputs = project.Outputs
+	}
+	if err := validateBindings(req.Bindings); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := validateOutputs(req.Outputs); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	project.Name = req.Name
+	project.Design = req.Design
+	project.Bindings = req.Bindings
+	project.Outputs = req.Outputs
+	project.UpdatedAt = time.Now().UTC()
+	if err := s.stores.Projects.Update(r.Context(), project); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "updating project failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
+}
+
+func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.ownedProject(w, r)
+	if !ok {
+		return
+	}
+	if err := s.stores.Projects.Delete(r.Context(), project.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "deleting project failed")
+		return
+	}
+	// Cascade: revoke the project's deploy tokens so a recreated project
+	// with the same id can never be pulled with old credentials.
+	tokens, err := s.stores.DeployTokens.ListByProject(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "revoking deploy tokens failed")
+		return
+	}
+	now := time.Now().UTC()
+	for _, t := range tokens {
+		if t.RevokedAt != nil {
+			continue
+		}
+		if err := s.stores.DeployTokens.Revoke(r.Context(), project.ID, t.ID, now); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "revoking deploy tokens failed")
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ownedProject loads the {id} project and enforces ownership; on failure it
+// writes the 404 envelope (not-found and not-yours are indistinguishable on
+// purpose) and returns ok=false.
+func (s *Server) ownedProject(w http.ResponseWriter, r *http.Request) (*store.Project, bool) {
+	project, err := s.stores.Projects.Get(r.Context(), r.PathValue("id"))
+	if err != nil || project.UserID != userID(r) {
+		writeError(w, http.StatusNotFound, "not_found", "project not found")
+		return nil, false
+	}
+	return project, true
+}
+
+// uniqueProjectID makes base unique among existing projects by suffixing
+// "-2", "-3", ... A random id is the last resort, not an expected path.
+func (s *Server) uniqueProjectID(ctx context.Context, base string) string {
+	if _, err := s.stores.Projects.Get(ctx, base); err != nil {
+		return base
+	}
+	for n := 2; n <= 100; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if _, err := s.stores.Projects.Get(ctx, candidate); err != nil {
+			return candidate
+		}
+	}
+	return randomID()
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {

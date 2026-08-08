@@ -12,6 +12,14 @@ type Config struct {
 	RendererURL string
 	// Env is the deployment environment, e.g. "dev" or "prod" (MIB_ENV).
 	Env string
+	// Store selects the persistence backend: "file" or "memory" (MIB_STORE).
+	// Defaults to the durable file store; "memory" exists for tests and
+	// throwaway runs.
+	Store string
+	// DataDir is where the file store keeps its JSON collections
+	// (MIB_DATA_DIR, default "./data" relative to the working directory;
+	// created on demand, gitignored).
+	DataDir string
 	// DemoDataPath points at the demo connector-data fixture (MIB_DEMO_DATA).
 	// Relative paths are resolved robustly; see internal/fixture.
 	DemoDataPath string
@@ -28,6 +36,8 @@ func Load() Config {
 		Addr:           getenv("MIB_ADDR", ":7800"),
 		RendererURL:    getenv("MIB_RENDERER_URL", "http://localhost:7801"),
 		Env:            getenv("MIB_ENV", "dev"),
+		Store:          getenv("MIB_STORE", "file"),
+		DataDir:        getenv("MIB_DATA_DIR", "./data"),
 		DemoDataPath:   getenv("MIB_DEMO_DATA", "../../examples/demo-data.json"),
 		DemoDesignPath: getenv("MIB_DEMO_DESIGN", "../../examples/demo-design.json"),
 		KitDir:         getenv("MIB_KIT_DIR", "../../packages/kit/components"),

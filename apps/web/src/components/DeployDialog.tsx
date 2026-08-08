@@ -1,6 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Check, Copy, Rocket } from "lucide-react";
+import { Check, Copy, KeyRound, RefreshCw, Rocket } from "lucide-react";
+import {
+  ApiError,
+  createDeployToken,
+  listDeployTokens,
+  revokeDeployToken,
+  toApiError,
+  type CreatedDeployToken,
+  type DeployTokenInfo,
+  type Output,
+  type Project,
+} from "@/lib/api";
+import { timeAgo } from "@/lib/format";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,15 +23,25 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-const DEV_DEPLOY_TOKEN = "dev-demo-token";
+const DEFAULT_API_URL = "http://localhost:7800";
+
+/** The Action step needs an output to name a file; API-created projects always
+ * have one, but guard anyway so the dialog never renders broken snippets. */
+function firstOutput(project: Project): Output {
+  return project.outputs.length > 0
+    ? project.outputs[0]
+    : { id: "default", filename: "card.svg" };
+}
 
 /**
  * Single-project trim of packages/action/templates/profile-workflow.yml,
- * prefilled for project "demo". Kept in sync by hand until real project
- * management generates this server-side (next phase).
+ * interpolated with the real project id, output and API URL.
  */
-const WORKFLOW_YML = `# MakeItBeauty — profile refresh workflow (project: demo)
+function workflowYml(project: Project, output: Output, apiUrl: string): string {
+  return `# MakeItBeauty — profile refresh workflow (project: ${project.id})
 #
 # KEEPALIVE NOTE: GitHub disables scheduled workflows after ~60 days without
 # repo activity; any commit or re-enabling the workflow resets the clock.
@@ -40,13 +63,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Render demo
+      - name: Render ${project.id}
         uses: makeitbeauty/action@v0
         with:
-          project: demo
+          api-url: ${apiUrl}
+          project: ${project.id}
           deploy-token: \${{ secrets.MAKEITBEAUTY_DEPLOY_TOKEN }}
-          output: default
-          path: rendered/assets/card.svg
+          output: ${output.id}
+          path: rendered/assets/${output.filename}
 
       - name: Commit to output branch
         # The output branch is kept at a SINGLE forced commit: no history
@@ -70,14 +94,104 @@ jobs:
               commit -m "render: refresh images"
           git push --force origin output
 `;
+}
 
-const README_SNIPPET = `<img src="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_USERNAME/output/assets/card.svg"
+function embedSnippet(output: Output): string {
+  return `<img src="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_USERNAME/output/assets/${output.filename}"
      alt="Profile card" />`;
+}
 
-/** Header "Deploy" button + instructions dialog. Static v0 for project "demo". */
-export function DeployDialog() {
+interface Props {
+  project: Project;
+}
+
+/**
+ * Header "Deploy" button + instructions dialog with real deploy-token
+ * management (architecture §8): tokens are listed masked on open; generating
+ * one shows the plaintext exactly once — closing the dialog forgets it.
+ */
+export function DeployDialog({ project }: Props) {
+  const [open, setOpen] = useState(false);
+
+  const [tokens, setTokens] = useState<DeployTokenInfo[] | null>(null);
+  const [tokensError, setTokensError] = useState<ApiError | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [fresh, setFresh] = useState<CreatedDeployToken | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [mutError, setMutError] = useState<ApiError | null>(null);
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setTokensError(null);
+    (async () => {
+      try {
+        setTokens(await listDeployTokens(project.id, controller.signal));
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        setTokensError(toApiError(e));
+      }
+    })();
+    return () => controller.abort();
+  }, [open, project.id, attempt]);
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      // The plaintext token is shown exactly once; closing forgets it.
+      setFresh(null);
+      setTokens(null);
+      setTokensError(null);
+      setMutError(null);
+    }
+  }
+
+  async function generate() {
+    if (generating) return;
+    setGenerating(true);
+    setMutError(null);
+    try {
+      const created = await createDeployToken(project.id);
+      setFresh(created);
+      setTokens((prev) => [
+        { id: created.id, createdAt: created.createdAt },
+        ...(prev ?? []),
+      ]);
+    } catch (e) {
+      setMutError(toApiError(e));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function revoke(tokenId: string) {
+    if (revokingId != null) return;
+    setRevokingId(tokenId);
+    setMutError(null);
+    try {
+      await revokeDeployToken(project.id, tokenId);
+      const now = new Date().toISOString();
+      setTokens(
+        (prev) =>
+          prev?.map((t) => (t.id === tokenId ? { ...t, revokedAt: now } : t)) ??
+          prev,
+      );
+      // Revoking the token that was just generated makes its plaintext useless.
+      setFresh((f) => (f?.id === tokenId ? null : f));
+    } catch (e) {
+      setMutError(toApiError(e));
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  const output = firstOutput(project);
+  const activeCount = tokens?.filter((t) => !t.revokedAt).length ?? 0;
+
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Rocket data-icon="inline-start" />
@@ -86,7 +200,7 @@ export function DeployDialog() {
       </DialogTrigger>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Deploy “demo” to your profile</DialogTitle>
+          <DialogTitle>Deploy “{project.name}” to your profile</DialogTitle>
           <DialogDescription>
             Your repo pulls a fresh render on a schedule and commits it to an{" "}
             <code className="font-mono text-xs">output</code> branch — MakeItBeauty
@@ -95,23 +209,161 @@ export function DeployDialog() {
         </DialogHeader>
 
         <div className="min-h-0 space-y-5 overflow-y-auto pr-1">
-          <Step n={1} title="Add the workflow to your profile repo">
+          <Step n={1} title="Create a deploy token">
+            <p className="text-xs text-muted-foreground">
+              Per-project, pull-only and revocable — it can render this project,
+              nothing else. Add it to your profile repo under Settings → Secrets
+              and variables → Actions as{" "}
+              <code className="font-mono">MAKEITBEAUTY_DEPLOY_TOKEN</code>.
+            </p>
+
+            {tokensError ? (
+              <Alert variant="destructive">
+                <AlertTitle>
+                  Couldn't load tokens{" "}
+                  <code className="font-mono text-[10px] opacity-70">
+                    [{tokensError.code}]
+                  </code>
+                </AlertTitle>
+                <AlertDescription>
+                  <p>{tokensError.message}</p>
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    onClick={() => setAttempt((n) => n + 1)}
+                  >
+                    <RefreshCw data-icon="inline-start" />
+                    Retry
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : tokens == null ? (
+              <p className="text-xs text-muted-foreground">Loading tokens…</p>
+            ) : (
+              <>
+                {fresh && (
+                  <div className="space-y-1.5 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                    <p className="text-xs font-medium text-amber-500">
+                      Copy it now — you won't see this token again.
+                    </p>
+                    <Snippet text={fresh.token} label="deploy token" />
+                    <p className="text-[11px] text-muted-foreground">
+                      Only a hash is stored server-side; closing this dialog
+                      forgets the plaintext.
+                    </p>
+                  </div>
+                )}
+
+                {tokens.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {tokens.map((t) => (
+                      <li
+                        key={t.id}
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+                          t.revokedAt ? "opacity-60" : ""
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="font-mono text-xs" aria-hidden>
+                              ••••••••
+                            </span>
+                            <span className="truncate font-mono text-[10px] text-muted-foreground">
+                              {t.id}
+                            </span>
+                            {t.revokedAt && (
+                              <span className="rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                revoked
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            created {timeAgo(t.createdAt)}
+                          </p>
+                        </div>
+                        {!t.revokedAt && (
+                          <Button
+                            variant="destructive"
+                            size="xs"
+                            onClick={() => void revoke(t.id)}
+                            disabled={revokingId != null}
+                          >
+                            {revokingId === t.id ? "Revoking…" : "Revoke"}
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {tokens.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No deploy tokens yet — generate one to let your repo pull
+                    renders.
+                  </p>
+                )}
+                {tokens.length > 0 && activeCount === 0 && !fresh && (
+                  <p className="text-xs text-muted-foreground">
+                    All tokens are revoked — generate a new one.
+                  </p>
+                )}
+
+                <Button
+                  variant={activeCount === 0 ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => void generate()}
+                  disabled={generating}
+                >
+                  <KeyRound data-icon="inline-start" />
+                  {generating
+                    ? "Generating…"
+                    : activeCount === 0
+                      ? "Generate deploy token"
+                      : "Generate new token"}
+                </Button>
+              </>
+            )}
+
+            {mutError && (
+              <Alert variant="destructive">
+                <AlertTitle>
+                  Token operation failed{" "}
+                  <code className="font-mono text-[10px] opacity-70">
+                    [{mutError.code}]
+                  </code>
+                </AlertTitle>
+                <AlertDescription>{mutError.message}</AlertDescription>
+              </Alert>
+            )}
+          </Step>
+
+          <Step n={2} title="Add the workflow to your profile repo">
             <p className="text-xs text-muted-foreground">
               Save as{" "}
               <code className="font-mono">.github/workflows/makeitbeauty.yml</code>{" "}
               in the repo named after your username.
             </p>
-            <Snippet text={WORKFLOW_YML} label="workflow" tall />
-          </Step>
-
-          <Step n={2} title="Add the deploy token as a repo secret">
-            <p className="text-xs text-muted-foreground">
-              Settings → Secrets and variables → Actions → New repository secret,
-              named <code className="font-mono">MAKEITBEAUTY_DEPLOY_TOKEN</code>.
-              This is the dev token — per-project tokens with revocation arrive
-              with project management.
-            </p>
-            <Snippet text={DEV_DEPLOY_TOKEN} label="token" />
+            <div className="flex items-center gap-2">
+              <Label
+                htmlFor="deploy-api-url"
+                className="shrink-0 text-xs text-muted-foreground"
+              >
+                API URL
+              </Label>
+              <Input
+                id="deploy-api-url"
+                value={apiUrl}
+                onChange={(e) => setApiUrl(e.target.value)}
+                className="h-7 font-mono text-xs"
+                spellCheck={false}
+              />
+            </div>
+            <Snippet
+              text={workflowYml(project, output, apiUrl.trim() || DEFAULT_API_URL)}
+              label="workflow"
+              tall
+            />
           </Step>
 
           <Step n={3} title="Embed the image in your README">
@@ -120,7 +372,7 @@ export function DeployDialog() {
               GitHub's Camo proxy caches it for ~5 minutes, so refreshes appear
               shortly after each run.
             </p>
-            <Snippet text={README_SNIPPET} label="embed" />
+            <Snippet text={embedSnippet(output)} label="embed" />
           </Step>
         </div>
       </DialogContent>

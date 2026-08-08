@@ -2,3 +2,8 @@ packages:
   - apps/web
   - apps/renderer
   - packages/*
+
+# pnpm 10 blocks dependency build scripts unless approved. esbuild's install
+# script places its platform binary; nothing else here needs to run scripts.
+onlyBuiltDependencies:
+  - esbuild

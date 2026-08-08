@@ -3,6 +3,7 @@
  *
  *   POST /internal/render   {design, data, options?} → 200 {svg, warnings}
  *                           errors → non-200 {"error":{"code","message"}}
+ *   GET  /healthz           → 200 {"ok":true} (same shape as the API's)
  *
  * Listens on MIB_RENDERER_ADDR (default ":7801", Go-style host:port).
  */
@@ -95,6 +96,15 @@ async function handleRender(req: IncomingMessage, res: ServerResponse): Promise<
 
 const server = createServer((req, res) => {
   const path = (req.url ?? "").split("?")[0];
+  if (path === "/healthz") {
+    if (req.method !== "GET") {
+      sendError(res, 405, "METHOD_NOT_ALLOWED", "use GET /healthz");
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (path !== "/internal/render") {
     sendError(res, 404, "NOT_FOUND", `no route ${path}`);
     return;

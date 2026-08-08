@@ -44,6 +44,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects", s.requireSession(s.handleCreateProject))
 	mux.HandleFunc("GET /v1/projects", s.requireSession(s.handleListProjects))
 	mux.HandleFunc("GET /v1/projects/{id}", s.requireSession(s.handleGetProject))
+	mux.HandleFunc("PUT /v1/projects/{id}", s.requireSession(s.handleUpdateProject))
+	mux.HandleFunc("DELETE /v1/projects/{id}", s.requireSession(s.handleDeleteProject))
+	mux.HandleFunc("POST /v1/projects/{id}/tokens", s.requireSession(s.handleCreateToken))
+	mux.HandleFunc("GET /v1/projects/{id}/tokens", s.requireSession(s.handleListTokens))
+	mux.HandleFunc("DELETE /v1/projects/{id}/tokens/{tokenId}", s.requireSession(s.handleRevokeToken))
 
 	// Everything else: JSON 404 envelope instead of the default text page.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

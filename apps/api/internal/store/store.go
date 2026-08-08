@@ -89,6 +89,12 @@ type Projects interface {
 	Create(ctx context.Context, p *Project) error
 	Get(ctx context.Context, id string) (*Project, error)
 	ListByUser(ctx context.Context, userID string) ([]*Project, error)
+	// Update replaces the stored project with p (matched by p.ID).
+	// Returns ErrNotFound if no such project exists.
+	Update(ctx context.Context, p *Project) error
+	// Delete removes a project. Returns ErrNotFound if no such project
+	// exists. Token cascade is the caller's job (httpapi), not the store's.
+	Delete(ctx context.Context, id string) error
 }
 
 // DeployTokens persists per-project deploy tokens.
@@ -98,6 +104,10 @@ type DeployTokens interface {
 	// an unknown project yields an empty slice, not an error, so auth failures
 	// don't leak project existence.
 	ListByProject(ctx context.Context, projectID string) ([]*DeployToken, error)
+	// Revoke marks one token revoked at the given time. Returns ErrNotFound
+	// if the (projectID, tokenID) pair matches nothing; revoking an already
+	// revoked token is a no-op that keeps the original RevokedAt.
+	Revoke(ctx context.Context, projectID, tokenID string, at time.Time) error
 }
 
 // ConnectorAccounts persists user-level connector configurations.

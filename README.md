@@ -1,4 +1,4 @@
-# MakeItBeauty ✨
+# MakeItBeauty ✨ [![CI](https://github.com/PengLx/makeitbeauty/actions/workflows/ci.yml/badge.svg)](https://github.com/PengLx/makeitbeauty/actions/workflows/ci.yml)
 
 **Design beautiful, data-driven images for your GitHub profile README.**
 
@@ -7,8 +7,10 @@ Drag and resize components on a canvas (or edit the design as code), bind them t
 through **connectors** (GitHub, WakaTime, …), and publish self-contained animated SVGs that
 render perfectly inside GitHub's README sandbox.
 
-> Status: early scaffold. Architecture is settled (see [docs/architecture.md](docs/architecture.md)),
-> implementation is in progress.
+> Status: **usable self-host alpha** — visual editor (shadcn/ui), kit components with
+> live-data bindings, durable projects, deploy-token lifecycle, and CI-enforced
+> deterministic renders. GitHub App login and hosted connectors are the next
+> milestones ([docs/architecture.md](docs/architecture.md) §10).
 
 ## How it works — the three-plane model
 

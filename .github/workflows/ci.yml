@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Test, build & determinism gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          # apps/api is stdlib-only (no go.sum), so key the module/build cache
+          # on go.mod instead of setup-go's default go.sum lookup.
+          cache-dependency-path: apps/api/go.mod
+
+      # packageManager in package.json pins the exact pnpm version; corepack
+      # must be enabled before setup-node so its pnpm cache step can run pnpm.
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Fonts are gitignored release assets (Inter, from GitHub releases) —
+      # fetched fresh each run; the renderer refuses to start without them.
+      - name: Fetch fonts
+        run: make fonts
+
+      - name: Test (schema validation + renderer vitest + go test)
+        run: make test
+
+      - name: Build
+        run: make build
+
+      # Product contract (architecture.md §3): same design + same data must
+      # produce a byte-identical SVG, so user Actions can skip no-op commits.
+      - name: Determinism gate — demo renders byte-identical twice
+        run: |
+          set -euo pipefail
+          pnpm --filter @makeitbeauty/renderer demo
+          cp apps/renderer/out/demo.svg "$RUNNER_TEMP/demo-first.svg"
+          pnpm --filter @makeitbeauty/renderer demo
+          if ! cmp apps/renderer/out/demo.svg "$RUNNER_TEMP/demo-first.svg"; then
+            echo "::error title=Determinism violation::demo.svg is not byte-identical across two renders — deterministic output is a stated product contract (architecture.md §3)"
+            exit 1
+          fi
+          pnpm --filter @makeitbeauty/renderer demo:kit
+          cp apps/renderer/out/demo-kit.svg "$RUNNER_TEMP/demo-kit-first.svg"
+          pnpm --filter @makeitbeauty/renderer demo:kit
+          if ! cmp apps/renderer/out/demo-kit.svg "$RUNNER_TEMP/demo-kit-first.svg"; then
+            echo "::error title=Determinism violation::demo-kit.svg is not byte-identical across two renders — deterministic output is a stated product contract (architecture.md §3)"
+            exit 1
+          fi

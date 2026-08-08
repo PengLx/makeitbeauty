@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // NewMemory returns fully in-memory Stores, suitable for dev and tests.
@@ -76,6 +77,27 @@ func (s *memProjects) ListByUser(_ context.Context, userID string) ([]*Project, 
 	return out, nil
 }
 
+func (s *memProjects) Update(_ context.Context, p *Project) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[p.ID]; !ok {
+		return ErrNotFound
+	}
+	cp := *p
+	s.m[p.ID] = &cp
+	return nil
+}
+
+func (s *memProjects) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.m, id)
+	return nil
+}
+
 type memDeployTokens struct {
 	mu        sync.RWMutex
 	byProject map[string][]*DeployToken
@@ -99,6 +121,21 @@ func (s *memDeployTokens) ListByProject(_ context.Context, projectID string) ([]
 		out = append(out, &cp)
 	}
 	return out, nil
+}
+
+func (s *memDeployTokens) Revoke(_ context.Context, projectID, tokenID string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.byProject[projectID] {
+		if t.ID == tokenID {
+			if t.RevokedAt == nil {
+				at := at
+				t.RevokedAt = &at
+			}
+			return nil
+		}
+	}
+	return ErrNotFound
 }
 
 type memConnectorAccounts struct {

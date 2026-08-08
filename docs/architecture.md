@@ -163,8 +163,11 @@ DeployToken      { id, projectId, hash, createdAt, revokedAt? }
 Snapshot         { userId, connector, data, fetchedAt, ttlSeconds }   (cache)
 ```
 
-Storage: interfaces with in-memory implementation for the scaffold; Postgres is the
-target. Credentials use envelope encryption with KMS-managed keys (see SECURITY.md).
+Storage: clean interfaces with two implementations — in-memory (tests) and a
+file-backed JSON store (`MIB_DATA_DIR`, default `./data`, gitignored) that makes
+dev and small self-host deployments durable with zero dependencies. Postgres is
+the scale target behind the same interfaces. Credentials use envelope encryption
+with KMS-managed keys (see SECURITY.md).
 
 ## 8. API contracts (v0)
 
@@ -177,8 +180,13 @@ target. Credentials use envelope encryption with KMS-managed keys (see SECURITY.
   This is the endpoint the GitHub Action calls.
 - `POST /v1/preview` — dev/session auth. Body `{design, data?}`; omitted data falls
   back to demo fixtures. Responds `image/svg+xml`. Used by the editor's live preview.
-- `POST /v1/projects`, `GET /v1/projects`, `GET /v1/projects/{id}` — session auth
-  (stubbed in scaffold).
+- `POST /v1/projects`, `GET /v1/projects`, `GET /v1/projects/{id}`,
+  `PUT /v1/projects/{id}` (name/design/bindings/outputs), `DELETE /v1/projects/{id}`
+  — session auth (dev: implicit user until GitHub App login lands).
+- Deploy tokens: `POST /v1/projects/{id}/tokens` → `{id, token, createdAt}` — the
+  plaintext token appears in this response ONCE and is never retrievable again
+  (only its hash is stored); `GET /v1/projects/{id}/tokens` → masked list
+  (id, createdAt, revokedAt); `DELETE /v1/projects/{id}/tokens/{tokenId}` revokes.
 - `GET /v1/kit` — public kit component metadata for the editor palette:
   `[{id: "kit/stat-card", title, description?, frame: {w, h}, props}]`, served
   from `packages/kit/components`.

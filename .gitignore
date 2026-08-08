@@ -16,6 +16,9 @@ apps/api/api
 apps/renderer/fonts/*.ttf
 apps/renderer/fonts/*.otf
 
+# local data (file-backed store)
+data/
+
 # misc
 coverage/
 .DS_Store
