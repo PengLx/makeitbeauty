@@ -19,10 +19,17 @@ COPY apps/web/package.json apps/web/
 COPY packages/action/package.json packages/action/
 COPY packages/kit/package.json packages/kit/
 COPY packages/schema/package.json packages/schema/
-RUN pnpm install --frozen-lockfile --filter @makeitbeauty/web
+COPY packages/twc/package.json packages/twc/
+# twc must be SELECTED, not just pulled in as a workspace dep: only selected
+# projects get devDependencies, and twc's build needs its own typescript.
+RUN pnpm install --frozen-lockfile --filter @makeitbeauty/web --filter @makeitbeauty/twc
 
+# build the twc workspace dep before web's tsc can resolve it
+COPY packages/twc/tsconfig.json packages/twc/
+COPY packages/twc/src/ packages/twc/src/
 COPY apps/web/ apps/web/
-RUN pnpm --filter @makeitbeauty/web build
+RUN pnpm --filter @makeitbeauty/twc build \
+ && pnpm --filter @makeitbeauty/web build
 
 FROM nginx:alpine
 COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
