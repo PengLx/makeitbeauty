@@ -23,10 +23,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
-const DEFAULT_API_URL = "http://localhost:7800";
+/** Single-domain architecture: nginx serves the SPA and proxies /v1 to the API,
+ * so the Action's api-url is always the origin the editor itself runs on.
+ * Auto-detected, not user-editable — in dev the Vite proxy makes the origin
+ * work too. */
+const API_URL = window.location.origin;
 
 /** The Action step needs an output to name a file; API-created projects always
  * have one, but guard anyway so the dialog never renders broken snippets. */
@@ -120,7 +122,6 @@ export function DeployDialog({ project }: Props) {
   const [generating, setGenerating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [mutError, setMutError] = useState<ApiError | null>(null);
-  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
 
   useEffect(() => {
     if (!open) return;
@@ -344,23 +345,8 @@ export function DeployDialog({ project }: Props) {
               <code className="font-mono">.github/workflows/makeitbeauty.yml</code>{" "}
               in the repo named after your username.
             </p>
-            <div className="flex items-center gap-2">
-              <Label
-                htmlFor="deploy-api-url"
-                className="shrink-0 text-xs text-muted-foreground"
-              >
-                API URL
-              </Label>
-              <Input
-                id="deploy-api-url"
-                value={apiUrl}
-                onChange={(e) => setApiUrl(e.target.value)}
-                className="h-7 font-mono text-xs"
-                spellCheck={false}
-              />
-            </div>
             <Snippet
-              text={workflowYml(project, output, apiUrl.trim() || DEFAULT_API_URL)}
+              text={workflowYml(project, output, API_URL)}
               label="workflow"
               tall
             />

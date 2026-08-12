@@ -14,7 +14,7 @@ inputs:
   api-url:
     description: "Base URL of the MakeItBeauty API."
     required: false
-    default: "https://api.makeitbeauty.dev"
+    default: "https://makeitbeauty.org"
   project:
     description: "Project id to render."
     required: true

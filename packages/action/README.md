@@ -10,7 +10,7 @@ replacement — because everything interesting happens on the render plane.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `api-url` | no | `https://api.makeitbeauty.dev` | Base URL of the MakeItBeauty API. |
+| `api-url` | no | `https://makeitbeauty.org` | Base URL of the MakeItBeauty API (the editor's own domain — it serves the API under `/v1`). |
 | `project` | **yes** | — | Project id to render. |
 | `deploy-token` | **yes** | — | Per-project deploy token. Store it as a repo secret; never inline it. |
 | `output` | no | `default` | Output id within the project (e.g. a theme variant). |
