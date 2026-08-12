@@ -209,12 +209,19 @@ describe("kit loading", () => {
     const loaded = kitRegistry();
     expect([...loaded.keys()].sort()).toEqual([
       "kit/accent-divider",
+      "kit/activity-sparkline",
+      "kit/contribution-heatmap",
+      "kit/glow-stat",
+      "kit/gradient-banner",
+      "kit/language-bar",
       "kit/metric-badge",
       "kit/profile-header",
       "kit/progress-bar",
       "kit/quote-banner",
       "kit/stat-card",
       "kit/stat-trio",
+      "kit/streak-flame",
+      "kit/terminal-card",
       "kit/text-banner",
     ]);
     for (const component of loaded.values()) expect(component.nodes.length).toBeGreaterThan(0);

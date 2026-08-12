@@ -3,9 +3,11 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -50,7 +52,24 @@ func (f *fakeGitHub) server() *httptest.Server {
 			"login": "grace",
 			"avatarUrl": "https://avatars.example/1",
 			"followers": {"totalCount": 42},
-			"contributionsCollection": {"contributionCalendar": {"totalContributions": 1234}},
+			"contributionsCollection": {"contributionCalendar": {
+				"totalContributions": 1234,
+				"weeks": [
+					{"contributionDays": [
+						{"date": "2026-07-27", "contributionCount": 1},
+						{"date": "2026-07-28", "contributionCount": 0},
+						{"date": "2026-07-29", "contributionCount": 2},
+						{"date": "2026-07-30", "contributionCount": 3},
+						{"date": "2026-07-31", "contributionCount": 1},
+						{"date": "2026-08-01", "contributionCount": 0},
+						{"date": "2026-08-02", "contributionCount": 2}
+					]},
+					{"contributionDays": [
+						{"date": "2026-08-03", "contributionCount": 4},
+						{"date": "2026-08-04", "contributionCount": 5}
+					]}
+				]
+			}},
 			"repositories": {"nodes": [
 				{"stargazerCount": 10, "primaryLanguage": {"name": "Go"}},
 				{"stargazerCount": 3, "primaryLanguage": {"name": "TypeScript"}},
@@ -161,6 +180,22 @@ func TestGitHubFetchWithoutCredentialsServesFixture(t *testing.T) {
 			if got := lookupPath(t, snap, "stats", "topLanguage"); got != "TypeScript" {
 				t.Errorf("stats.topLanguage = %v, want the fixture value", got)
 			}
+			// The extended stat fields ship in the same fixture (JSON
+			// numbers decode as float64).
+			if got := lookupPath(t, snap, "stats", "currentStreak"); got != float64(4) {
+				t.Errorf("stats.currentStreak = %v, want 4", got)
+			}
+			if got := lookupPath(t, snap, "stats", "longestStreak"); got != float64(9) {
+				t.Errorf("stats.longestStreak = %v, want 9", got)
+			}
+			calendar, ok := lookupPath(t, snap, "stats", "calendar").([]any)
+			if !ok || len(calendar) != 365 {
+				t.Errorf("stats.calendar has %d entries, want 365", len(calendar))
+			}
+			langs, ok := lookupPath(t, snap, "stats", "topLanguages").([]any)
+			if !ok || len(langs) != 5 {
+				t.Errorf("stats.topLanguages has %d entries, want 5", len(langs))
+			}
 		})
 	}
 }
@@ -199,6 +234,35 @@ func TestGitHubFetchLiveSnapshot(t *testing.T) {
 	}
 	if got := lookupPath(t, snap, "stats", "totalContributions"); got != 1234 {
 		t.Errorf("stats.totalContributions = %v", got)
+	}
+	// Calendar: the fake's two weeks flatten oldest-first.
+	calendar, ok := lookupPath(t, snap, "stats", "calendar").([]any)
+	if !ok || len(calendar) != 9 {
+		t.Fatalf("stats.calendar = %#v, want 9 flattened days", lookupPath(t, snap, "stats", "calendar"))
+	}
+	first, last := calendar[0].(map[string]any), calendar[8].(map[string]any)
+	if first["date"] != "2026-07-27" || first["count"] != 1 {
+		t.Errorf("calendar[0] = %v, want 2026-07-27/1", first)
+	}
+	if last["date"] != "2026-08-04" || last["count"] != 5 {
+		t.Errorf("calendar[8] = %v, want 2026-08-04/5", last)
+	}
+	// Streaks derive from the calendar, not wall-clock today: 2026-08-02..04
+	// are the trailing nonzero run (2026-08-01 is 0).
+	if got := lookupPath(t, snap, "stats", "currentStreak"); got != 3 {
+		t.Errorf("stats.currentStreak = %v, want 3", got)
+	}
+	if got := lookupPath(t, snap, "stats", "longestStreak"); got != 3 {
+		t.Errorf("stats.longestStreak = %v, want 3", got)
+	}
+	// topLanguages shares topLanguage's weights: Go 11/16, TypeScript 5/16,
+	// percents floored.
+	wantLangs := []any{
+		map[string]any{"name": "Go", "percent": 68},
+		map[string]any{"name": "TypeScript", "percent": 31},
+	}
+	if got := lookupPath(t, snap, "stats", "topLanguages"); !reflect.DeepEqual(got, wantLangs) {
+		t.Errorf("stats.topLanguages = %#v, want %#v", got, wantLangs)
 	}
 	if fake.refreshCalls != 0 {
 		t.Errorf("refresh called %d times for a fresh token", fake.refreshCalls)
@@ -353,5 +417,177 @@ func TestGitHubExpiredTokenServesStaleThroughCache(t *testing.T) {
 			t.Fatal("background revalidation never marked the account expired")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// ---- stat derivation units ----------------------------------------------
+
+// daysOf builds a flattened calendar with synthetic dates from counts.
+func daysOf(counts ...int) []calendarDay {
+	days := make([]calendarDay, len(counts))
+	for i, c := range counts {
+		days[i] = calendarDay{Date: fmt.Sprintf("day-%03d", i), Count: c}
+	}
+	return days
+}
+
+func TestFlattenCalendarOrderAndWindow(t *testing.T) {
+	// GitHub serves up to 53 full weeks (371 days); the snapshot keeps the
+	// trailing 365 without reordering anything.
+	var weeks []ghWeek
+	day := 0
+	for w := 0; w < 53; w++ {
+		var week ghWeek
+		for d := 0; d < 7; d++ {
+			week.ContributionDays = append(week.ContributionDays, struct {
+				Date              string `json:"date"`
+				ContributionCount int    `json:"contributionCount"`
+			}{Date: fmt.Sprintf("day-%03d", day), ContributionCount: day % 3})
+			day++
+		}
+		weeks = append(weeks, week)
+	}
+
+	days := flattenCalendar(weeks)
+	if len(days) != 365 {
+		t.Fatalf("len = %d, want 365 (371 flattened, trailing window kept)", len(days))
+	}
+	if days[0].Date != "day-006" || days[0].Count != 6%3 {
+		t.Errorf("first = %+v, want day-006 (the first 6 days dropped)", days[0])
+	}
+	if days[364].Date != "day-370" {
+		t.Errorf("last = %+v, want day-370", days[364])
+	}
+	for i := 1; i < len(days); i++ {
+		if days[i-1].Date >= days[i].Date {
+			t.Fatalf("order broken at %d: %s >= %s", i, days[i-1].Date, days[i].Date)
+		}
+	}
+
+	// A short calendar (young account) passes through unmodified.
+	short := flattenCalendar(weeks[:2])
+	if len(short) != 14 || short[0].Date != "day-000" {
+		t.Errorf("short calendar = %d entries starting %s, want 14 from day-000", len(short), short[0].Date)
+	}
+
+	// Empty input yields the empty (non-nil) series, not nil.
+	if got := flattenCalendar(nil); got == nil || len(got) != 0 {
+		t.Errorf("flattenCalendar(nil) = %#v, want empty non-nil slice", got)
+	}
+}
+
+func TestStreaks(t *testing.T) {
+	tests := []struct {
+		name             string
+		days             []calendarDay
+		current, longest int
+	}{
+		{"empty calendar", nil, 0, 0},
+		{"all zero", daysOf(0, 0, 0, 0, 0), 0, 0},
+		{"trailing zeros kill the current streak", daysOf(1, 2, 3, 0, 0), 0, 3},
+		{"run ending at the last day", daysOf(0, 1, 0, 2, 3), 2, 2},
+		{"longest in the middle, short tail", daysOf(1, 1, 1, 1, 0, 1), 1, 4},
+		{"single active day", daysOf(4), 1, 1},
+		{"full year", daysOf(make([]int, 0)...), 0, 0}, // replaced below
+	}
+	// Full year: every day active — both streaks span the window.
+	full := make([]int, 365)
+	for i := range full {
+		full[i] = 1 + i%4
+	}
+	tests[len(tests)-1] = struct {
+		name             string
+		days             []calendarDay
+		current, longest int
+	}{"full year", daysOf(full...), 365, 365}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current, longest := streaks(tt.days)
+			if current != tt.current || longest != tt.longest {
+				t.Errorf("streaks() = (%d, %d), want (%d, %d)", current, longest, tt.current, tt.longest)
+			}
+		})
+	}
+}
+
+func TestRankLanguages(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		if got := rankLanguages(nil); len(got) != 0 {
+			t.Errorf("rankLanguages(nil) = %#v, want empty", got)
+		}
+	})
+
+	t.Run("weight ordering with alphabetical tiebreak", func(t *testing.T) {
+		got := rankLanguages(map[string]int{"Go": 5, "C": 5, "Zig": 10})
+		want := []languageRank{{"Zig", 50}, {"C", 25}, {"Go", 25}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("percents floor so the sum never exceeds 100", func(t *testing.T) {
+		got := rankLanguages(map[string]int{"A": 1, "B": 1, "C": 1})
+		sum := 0
+		for _, l := range got {
+			if l.Percent != 33 {
+				t.Errorf("%s = %d%%, want 33 (floored)", l.Name, l.Percent)
+			}
+			sum += l.Percent
+		}
+		if sum > 100 {
+			t.Errorf("percent sum = %d, must be <= 100", sum)
+		}
+	})
+
+	t.Run("top five only, percents of the full total", func(t *testing.T) {
+		weights := map[string]int{"A": 60, "B": 20, "C": 10, "D": 5, "E": 3, "F": 2}
+		got := rankLanguages(weights)
+		if len(got) != 5 {
+			t.Fatalf("len = %d, want 5", len(got))
+		}
+		if got[0] != (languageRank{"A", 60}) || got[4] != (languageRank{"E", 3}) {
+			t.Errorf("got %#v", got)
+		}
+		sum := 0
+		for _, l := range got {
+			sum += l.Percent
+		}
+		if sum > 100 {
+			t.Errorf("percent sum = %d, must be <= 100", sum)
+		}
+	})
+
+	t.Run("deterministic across runs", func(t *testing.T) {
+		weights := map[string]int{"Go": 3, "Rust": 3, "C": 3, "Zig": 3, "TypeScript": 7, "Python": 1}
+		first := rankLanguages(weights)
+		for i := 0; i < 20; i++ {
+			if got := rankLanguages(weights); !reflect.DeepEqual(got, first) {
+				t.Fatalf("run %d differs: %#v vs %#v", i, got, first)
+			}
+		}
+	})
+}
+
+// The field catalog advertises the series-shaped paths with type "series" so
+// scalar editor pickers (string|number) never offer them for text insertion.
+func TestGitHubFieldsCatalogTypes(t *testing.T) {
+	types := map[string]string{}
+	for _, f := range GitHubFields {
+		if f.Type != "string" && f.Type != "number" && f.Type != "series" {
+			t.Errorf("field %q has unknown type %q", f.Path, f.Type)
+		}
+		types[f.Path] = f.Type
+	}
+	want := map[string]string{
+		"stats.calendar":      "series",
+		"stats.topLanguages":  "series",
+		"stats.currentStreak": "number",
+		"stats.longestStreak": "number",
+	}
+	for path, typ := range want {
+		if types[path] != typ {
+			t.Errorf("GitHubFields[%q] type = %q, want %q", path, types[path], typ)
+		}
 	}
 }

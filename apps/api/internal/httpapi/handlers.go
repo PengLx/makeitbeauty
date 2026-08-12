@@ -145,7 +145,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		// path production renders take, so preview = production for data
 		// too. (The dev stub connector serves the demo fixture, preserving
 		// the logged-out dev experience.)
-		bindings := deriveBindings(req.Design, s.cache.KnownConnectors())
+		bindings := s.deriveBindings(req.Design)
 		resolved, ok := s.resolveBindingData(w, r, userID(r), bindings)
 		if !ok {
 			return
@@ -235,7 +235,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// they are the consent record and render-time data filter, so they must
 	// track what the design actually references. Client-sent bindings are
 	// accepted on the wire for compatibility but ignored.
-	req.Bindings = deriveBindings(req.Design, s.cache.KnownConnectors())
+	req.Bindings = s.deriveBindings(req.Design)
 	if len(req.Outputs) == 0 {
 		req.Outputs = []store.Output{{ID: "default", Filename: "card.svg"}}
 	}
@@ -287,7 +287,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	// Bindings are recomputed from the design on every write (see
 	// handleCreateProject); client-sent bindings are ignored. Omitted
 	// outputs keep their stored values.
-	req.Bindings = deriveBindings(req.Design, s.cache.KnownConnectors())
+	req.Bindings = s.deriveBindings(req.Design)
 	if req.Outputs == nil {
 		req.Outputs = project.Outputs
 	}

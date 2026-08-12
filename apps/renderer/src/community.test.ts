@@ -83,6 +83,19 @@ describe("parseCommunityComponent", () => {
     );
   });
 
+  it("rejects native components — community components are declarative-only", () => {
+    expect(() =>
+      parseCommunityComponent(
+        { ...badge(), native: true, dataFields: ["stats.calendar"] },
+        "definition",
+      ),
+    ).toThrow(/declarative-only/);
+    // dataFields alone is just as much a native claim.
+    expect(() =>
+      parseCommunityComponent({ ...badge(), dataFields: ["stats.calendar"] }, "definition"),
+    ).toThrow(/declarative-only/);
+  });
+
   it("rejects malformed ids with the expected shape in the message", () => {
     for (const id of ["badge", "Ada/Badge@1", "ada/badge@x", "ada/badge@1@2", 7 as never]) {
       expect(() => parseCommunityComponent(badge({ id: id as string }), "definition")).toThrow(
@@ -183,6 +196,15 @@ describe("parseRequestComponents", () => {
     expect(() => parseRequestComponents([badge(), badge()])).toThrow(
       /duplicate definition for "ada\/badge@1"/,
     );
+  });
+
+  it("rejects a native definition inside a render request (natives ship with the kit)", () => {
+    expect(() =>
+      parseRequestComponents([{ ...badge(), native: true, dataFields: ["stats.calendar"] }]),
+    ).toThrow(/declarative-only/);
+    expect(() =>
+      parseRequestComponents([{ ...badge(), dataFields: ["stats.calendar"] }]),
+    ).toThrow(/declarative-only/);
   });
 });
 
@@ -329,6 +351,16 @@ describe("HTTP endpoints", () => {
       expect(res.status).toBe(422);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("invalid_component");
+    });
+
+    it("rejects a native definition with 422 — natives ship with MakeItBeauty itself", async () => {
+      const res = await post("/internal/validate-component", {
+        definition: { ...badge(), native: true, dataFields: ["stats.calendar"] },
+      });
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("invalid_component");
+      expect(body.error.message).toContain("declarative-only");
     });
 
     it("requires the definition field (400, request-shape error)", async () => {

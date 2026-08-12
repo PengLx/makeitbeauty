@@ -1,0 +1,67 @@
+{
+  "id": "streak-flame",
+  "title": "Streak flame",
+  "description": "Current contribution streak as a big headline number with a pulsing flame accent, plus the longest-streak record. Native component — the renderer generates the figures from stats.currentStreak / stats.longestStreak; the nodes below are the static palette preview.",
+  "native": true,
+  "dataFields": ["stats.currentStreak", "stats.longestStreak"],
+  "frame": { "w": 360, "h": 140 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the streak count.",
+      "default": "CURRENT STREAK"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Flame accent color for the count and underline.",
+      "default": "#f78166"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 360, "h": 140,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 18, "w": 320, "h": 16,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "count",
+      "type": "text",
+      "x": 20, "y": 42, "w": 200, "h": 46,
+      "text": "0",
+      "style": { "fontSize": 38, "fontWeight": 700, "color": "{{props.accent}}" }
+    },
+    {
+      "id": "count-unit",
+      "type": "text",
+      "x": 20, "y": 92, "w": 200, "h": 18,
+      "text": "day streak",
+      "style": { "fontSize": 13, "fontWeight": 500, "color": "#e6edf3" }
+    },
+    {
+      "id": "best",
+      "type": "text",
+      "x": 220, "y": 92, "w": 120, "h": 18,
+      "text": "best: 0",
+      "style": { "fontSize": 13, "fontWeight": 500, "color": "#7d8590", "align": "right" }
+    },
+    {
+      "id": "tick",
+      "type": "rect",
+      "x": 20, "y": 120, "w": 32, "h": 4,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    }
+  ]
+}

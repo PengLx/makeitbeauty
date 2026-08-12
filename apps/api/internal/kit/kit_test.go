@@ -133,6 +133,62 @@ func TestLoadParsesFields(t *testing.T) {
 	}
 }
 
+const validHeatmap = `{
+	"id": "contribution-heatmap",
+	"title": "Contribution heatmap",
+	"native": true,
+	"dataFields": ["stats.calendar"],
+	"frame": {"w": 720, "h": 140},
+	"props": {"accent": {"type": "string", "default": "#39d353"}},
+	"nodes": [{"id": "bg", "type": "rect"}]
+}`
+
+// Native kit components carry native + dataFields through to /v1/kit;
+// declarative components must not gain the fields.
+func TestLoadParsesNativeDataFields(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"heatmap.json":   validHeatmap,
+		"stat-card.json": validStatCard,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 2 {
+		t.Fatalf("got %d components, want 2", len(components))
+	}
+	heatmap, statCard := components[0], components[1]
+	if heatmap.ID != "kit/contribution-heatmap" || statCard.ID != "kit/stat-card" {
+		t.Fatalf("ids = %s, %s", heatmap.ID, statCard.ID)
+	}
+	if !heatmap.Native {
+		t.Error("heatmap.Native = false, want true")
+	}
+	if len(heatmap.DataFields) != 1 || heatmap.DataFields[0] != "stats.calendar" {
+		t.Errorf("heatmap.DataFields = %v, want [stats.calendar]", heatmap.DataFields)
+	}
+	if statCard.Native || statCard.DataFields != nil {
+		t.Errorf("declarative component parsed as native: %v / %v", statCard.Native, statCard.DataFields)
+	}
+}
+
+// native and dataFields imply each other (kit-component.schema.json
+// dependentRequired); half-declared files are malformed and skipped.
+func TestLoadRejectsHalfNativeComponents(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"native-no-fields.json": `{"id": "a", "title": "A", "native": true, "frame": {"w": 10, "h": 10}}`,
+		"fields-no-native.json": `{"id": "b", "title": "B", "dataFields": ["stats.calendar"], "frame": {"w": 10, "h": 10}}`,
+		"good.json":             validHeatmap,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 || components[0].ID != "kit/contribution-heatmap" {
+		t.Fatalf("components = %+v, want only kit/contribution-heatmap", components)
+	}
+}
+
 func TestLoadDefaultsMissingProps(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"bare.json": `{"id": "bare", "title": "Bare", "frame": {"w": 10, "h": 10}}`,

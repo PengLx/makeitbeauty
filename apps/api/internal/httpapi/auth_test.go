@@ -515,9 +515,20 @@ func TestConnectorsEndpoint(t *testing.T) {
 		t.Errorf("fields = %d entries, want %d", len(out[0].Fields), len(connector.GitHubFields))
 	}
 	for i, field := range out[0].Fields {
-		if field.Path != connector.GitHubFields[i].Path || field.Description == "" {
+		if field.Path != connector.GitHubFields[i].Path || field.Description == "" || field.Type != connector.GitHubFields[i].Type {
 			t.Errorf("fields[%d] = %+v, want %+v", i, field, connector.GitHubFields[i])
 		}
+	}
+	// The series-typed fields ride through to the editor: scalar pickers
+	// filter on string|number, so series stays un-insertable by construction.
+	seriesCount := 0
+	for _, field := range out[0].Fields {
+		if field.Type == "series" {
+			seriesCount++
+		}
+	}
+	if seriesCount < 2 {
+		t.Errorf("series fields served = %d, want at least stats.calendar and stats.topLanguages", seriesCount)
 	}
 
 	// Connected account.

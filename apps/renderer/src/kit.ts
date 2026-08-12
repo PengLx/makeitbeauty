@@ -10,6 +10,11 @@
  * aligned) → offset by instance x/y → prefix node ids with "{instanceId}__".
  * An unknown component id degrades to the dashed placeholder with a warning —
  * never a render failure. Nested instances are rejected at load time (v0).
+ *
+ * Components whose metadata declares {native: true, dataFields} skip the
+ * declarative fragment: a TRUSTED generator (src/native.ts) produces the
+ * nodes from (props, data, frame) — see the dispatch inside expandInstance.
+ * Community components can never be native (§7.5).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,6 +27,7 @@ import addFormatsExport, { type FormatsPlugin } from "ajv-formats";
 const addFormats = addFormatsExport as unknown as FormatsPlugin;
 
 import type { NodeGroup, RenderItem } from "./animate.js";
+import { nativeGenerators } from "./native.js";
 import { repoPath } from "./paths.js";
 import { resolveDeep } from "./template.js";
 import type { DesignNode, InstanceNode } from "./types.js";
@@ -52,6 +58,14 @@ export interface KitComponent {
   props: Record<string, KitProp>;
   nodes: KitFragmentNode[];
   computed?: ComputedEntry[];
+  /**
+   * Official-kit only: a trusted renderer generator produces this component's
+   * nodes from (props, data, frame); the declared nodes are the static
+   * fallback/palette preview. Community publish validation rejects the flag.
+   */
+  native?: true;
+  /** Connector snapshot paths a native component consumes (e.g. "stats.calendar"). */
+  dataFields?: string[];
 }
 
 /**
@@ -137,6 +151,10 @@ export function parseKitComponent(raw: unknown, context: string): KitComponent {
     throw new KitError(`${context}: invalid kit component:\n  ${errors.join("\n  ")}`);
   }
   const component = raw;
+  // Native components may omit the static preview entirely ("nodes: [] or
+  // absent" — the trusted generator supplies the render nodes); normalize so
+  // every downstream consumer sees an array.
+  (component as { nodes?: KitFragmentNode[] }).nodes ??= [];
   assertComponentSemantics(component, context);
   return component;
 }
@@ -283,6 +301,16 @@ export function parseCommunityComponent(
   if (id.startsWith("kit/")) {
     throw new KitError(
       `${context}: the "kit/" namespace is reserved for the official kit (got "${id}")`,
+    );
+  }
+  // Native components are official-kit only: their nodes come from trusted
+  // generator code in this service, so a community definition claiming
+  // native (or its dataFields companion) is rejected outright — community
+  // components stay declarative-only (architecture.md §7.5).
+  if ("native" in raw || "dataFields" in raw) {
+    throw new KitError(
+      `${context}: "native"/"dataFields" are reserved for the official kit — ` +
+        `community components are declarative-only`,
     );
   }
   if (options.requireVersion && !id.includes("@")) {
@@ -465,6 +493,70 @@ export function expandInstance(
   const props = mergeProps(node, component, warnings);
   const scope = { ...data, props };
   const s = Math.min(node.w / component.frame.w, node.h / component.frame.h);
+
+  // Native components (§5.7): a trusted generator (src/native.ts, keyed by
+  // the id without the "kit/" prefix) produces the nodes from (props, data,
+  // frame) — array-driven visuals that declarative fragments cannot express.
+  // Generated nodes are frame-relative and flow through the exact same
+  // scale/offset/id-prefix treatment as declarative fragments below. No
+  // generator registered → fall through to the component's declared static
+  // preview nodes (or the dashed placeholder when there are none) with a
+  // warning; a throwing generator (contract violation) degrades the same
+  // way — never a render failure.
+  if (component.native) {
+    const generator = nativeGenerators.get(component.id);
+    if (generator) {
+      try {
+        let stripped = false;
+        const generated: KitFragmentNode[] = generator({
+          props,
+          data,
+          frame: component.frame,
+        }).map((gen) => {
+          scaleAndOffset(gen, s, node.x, node.y);
+          gen.id = `${node.id}__${gen.id}`;
+          if (node.animation && gen.animation) {
+            stripped = true;
+            delete gen.animation;
+          }
+          return gen;
+        });
+        if (stripped) {
+          warnings.push(
+            `instance "${node.id}": generated node animations ignored — ` +
+              "an animated instance composes as one layer",
+          );
+        }
+        if (node.animation) {
+          const group: NodeGroup = {
+            kind: "group",
+            id: node.id,
+            animation: node.animation,
+            nodes: generated,
+          };
+          return { items: [group], warnings };
+        }
+        return { items: generated, warnings };
+      } catch (err) {
+        warnings.push(
+          `native component "${node.component}" generator failed ` +
+            `(${err instanceof Error ? err.message : String(err)}) — rendering placeholder`,
+        );
+        return { items: [node], warnings };
+      }
+    }
+    if (component.nodes.length === 0) {
+      warnings.push(
+        `native component "${node.component}" has no registered generator — rendering placeholder`,
+      );
+      return { items: [node], warnings };
+    }
+    warnings.push(
+      `native component "${node.component}" has no registered generator — ` +
+        "rendering its static preview",
+    );
+    // …and fall through to the declarative expansion of the preview nodes.
+  }
 
   const nodes = component.nodes.map((fragment) => {
     // Deep copy, then resolve every templated string (text, colors) with the

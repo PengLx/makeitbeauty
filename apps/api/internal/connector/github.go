@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/auth"
@@ -21,9 +22,13 @@ import (
 type Field struct {
 	Path        string `json:"path"`
 	Description string `json:"description"`
-	// Type is the value type at this path: "string" or "number". The editor's
-	// binding controls filter by it — a numeric prop (e.g. a progress bar's
-	// percent) only offers number fields.
+	// Type is the value type at this path: "string", "number", or "series".
+	// The editor's binding controls filter by it — a numeric prop (e.g. a
+	// progress bar's percent) only offers number fields. "series" marks
+	// array-shaped data (timeseries, ranked lists) that scalar pickers must
+	// never offer for text insertion: series fields exist for native kit
+	// components (which consume them via dataFields) and for the publish
+	// consent display.
 	Type string `json:"type"`
 }
 
@@ -38,18 +43,27 @@ var GitHubFields = []Field{
 	{Path: "stats.totalStars", Description: "Stars across owned repositories", Type: "number"},
 	{Path: "stats.topLanguage", Description: "Top language, star-weighted", Type: "string"},
 	{Path: "stats.totalContributions", Description: "Contributions in the last year", Type: "number"},
+	{Path: "stats.calendar", Description: "Daily contribution counts, last 365 days", Type: "series"},
+	{Path: "stats.currentStreak", Description: "Consecutive contribution days ending at the latest calendar day", Type: "number"},
+	{Path: "stats.longestStreak", Description: "Longest run of consecutive contribution days in the last year", Type: "number"},
+	{Path: "stats.topLanguages", Description: "Top 5 languages, star-weighted, as [{name, percent}]", Type: "series"},
 }
 
 // githubQuery fetches everything one snapshot needs in a single GraphQL round
 // trip. Contribution-calendar data has no anonymous path — this query is why
-// the GitHub connector is a login prerequisite (architecture.md §6).
+// the GitHub connector is a login prerequisite (architecture.md §6). The
+// repositories(first: 100) nodes feed totalStars, topLanguage AND
+// topLanguages: one node list, aggregated three ways, still one round trip.
 const githubQuery = `query {
   viewer {
     name
     login
     avatarUrl
     followers { totalCount }
-    contributionsCollection { contributionCalendar { totalContributions } }
+    contributionsCollection { contributionCalendar {
+      totalContributions
+      weeks { contributionDays { date contributionCount } }
+    } }
     repositories(first: 100, ownerAffiliations: OWNER) {
       nodes { stargazerCount primaryLanguage { name } }
     }
@@ -203,7 +217,8 @@ type ghViewer struct {
 	} `json:"followers"`
 	ContributionsCollection struct {
 		ContributionCalendar struct {
-			TotalContributions int `json:"totalContributions"`
+			TotalContributions int      `json:"totalContributions"`
+			Weeks              []ghWeek `json:"weeks"`
 		} `json:"contributionCalendar"`
 	} `json:"contributionsCollection"`
 	Repositories struct {
@@ -214,6 +229,95 @@ type ghViewer struct {
 			} `json:"primaryLanguage"`
 		} `json:"nodes"`
 	} `json:"repositories"`
+}
+
+// ghWeek is one contributionCalendar week; days run oldest-first inside it,
+// and GitHub returns the weeks themselves oldest-first.
+type ghWeek struct {
+	ContributionDays []struct {
+		Date              string `json:"date"`
+		ContributionCount int    `json:"contributionCount"`
+	} `json:"contributionDays"`
+}
+
+// calendarDay is one flattened contribution-calendar entry.
+type calendarDay struct {
+	Date  string
+	Count int
+}
+
+// calendarWindow is the number of trailing days the snapshot keeps. GitHub's
+// calendar spans full weeks (up to ~371 days); the snapshot is exactly the
+// last 365 so every user's series has the same, predictable length.
+const calendarWindow = 365
+
+// flattenCalendar flattens weeks into days, oldest first, keeping at most the
+// trailing calendarWindow entries. Order is exactly upstream order — GitHub
+// serves weeks and days oldest-first — so the result is deterministic for a
+// given response (renders must be reproducible, architecture.md §3).
+func flattenCalendar(weeks []ghWeek) []calendarDay {
+	days := []calendarDay{}
+	for _, week := range weeks {
+		for _, day := range week.ContributionDays {
+			days = append(days, calendarDay{Date: day.Date, Count: day.ContributionCount})
+		}
+	}
+	if len(days) > calendarWindow {
+		days = days[len(days)-calendarWindow:]
+	}
+	return days
+}
+
+// streaks derives the streak stats from a flattened calendar. current is the
+// run of days with Count > 0 ending at the LAST calendar day — deliberately
+// not wall-clock "today": the snapshot must be a pure function of upstream
+// data (determinism, architecture.md §3). longest is the maximum such run
+// anywhere in the window.
+func streaks(days []calendarDay) (current, longest int) {
+	run := 0
+	for _, day := range days {
+		if day.Count > 0 {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	return run, longest
+}
+
+// languageRank is one stats.topLanguages entry prior to snapshot encoding.
+type languageRank struct {
+	Name    string
+	Percent int
+}
+
+// rankLanguages turns the star-weighted language votes into the top (at most)
+// five languages with integer percents of the total weight. Percents floor
+// (integer division), so they always sum to <= 100; ordering is weight
+// descending with an alphabetical name tiebreak — fully deterministic.
+func rankLanguages(weights map[string]int) []languageRank {
+	names := make([]string, 0, len(weights))
+	total := 0
+	for name, weight := range weights {
+		names = append(names, name)
+		total += weight
+	}
+	sort.Slice(names, func(i, j int) bool {
+		wi, wj := weights[names[i]], weights[names[j]]
+		if wi != wj {
+			return wi > wj
+		}
+		return names[i] < names[j]
+	})
+	if len(names) > 5 {
+		names = names[:5]
+	}
+	ranked := make([]languageRank, len(names))
+	for i, name := range names {
+		ranked[i] = languageRank{Name: name, Percent: weights[name] * 100 / total}
+	}
+	return ranked
 }
 
 // query posts githubQuery and builds the snapshot. unauthorized reports an
@@ -275,7 +379,8 @@ func buildSnapshot(v ghViewer) map[string]any {
 	// Star-weighted language frequency: each repo votes stars+1 for its
 	// primary language, so starless repos still count once and starred work
 	// dominates. Ties break alphabetically — snapshots must be deterministic
-	// (architecture.md §3).
+	// (architecture.md §3). The same weights feed the scalar topLanguage and
+	// the topLanguages series, so the two can never disagree.
 	weights := map[string]int{}
 	for _, repo := range v.Repositories.Nodes {
 		totalStars += repo.StargazerCount
@@ -283,12 +388,22 @@ func buildSnapshot(v ghViewer) map[string]any {
 			weights[repo.PrimaryLanguage.Name] += repo.StargazerCount + 1
 		}
 	}
-	topLanguage, best := "", 0
-	for lang, weight := range weights {
-		if weight > best || (weight == best && lang < topLanguage) {
-			topLanguage, best = lang, weight
-		}
+	ranked := rankLanguages(weights)
+	topLanguage := ""
+	topLanguages := make([]any, len(ranked))
+	for i, lang := range ranked {
+		topLanguages[i] = map[string]any{"name": lang.Name, "percent": lang.Percent}
 	}
+	if len(ranked) > 0 {
+		topLanguage = ranked[0].Name
+	}
+
+	days := flattenCalendar(v.ContributionsCollection.ContributionCalendar.Weeks)
+	calendar := make([]any, len(days))
+	for i, day := range days {
+		calendar[i] = map[string]any{"date": day.Date, "count": day.Count}
+	}
+	currentStreak, longestStreak := streaks(days)
 
 	return map[string]any{
 		"user": map[string]any{
@@ -301,6 +416,10 @@ func buildSnapshot(v ghViewer) map[string]any {
 			"totalStars":         totalStars,
 			"topLanguage":        topLanguage,
 			"totalContributions": v.ContributionsCollection.ContributionCalendar.TotalContributions,
+			"calendar":           calendar,
+			"currentStreak":      currentStreak,
+			"longestStreak":      longestStreak,
+			"topLanguages":       topLanguages,
 		},
 	}
 }

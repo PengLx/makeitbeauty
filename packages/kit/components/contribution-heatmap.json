@@ -1,0 +1,95 @@
+{
+  "id": "contribution-heatmap",
+  "title": "Contribution heatmap",
+  "description": "GitHub-style contribution calendar: 365 days of commit activity as a week-by-week cell grid, colored by intensity. Native component — the renderer generates the cells from stats.calendar; the nodes below are the static palette preview.",
+  "native": true,
+  "dataFields": ["stats.calendar"],
+  "frame": { "w": 720, "h": 140 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the grid.",
+      "default": "CONTRIBUTIONS"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Color of the highest-intensity cells; lower levels are derived from it.",
+      "default": "#39d353"
+    },
+    "emptyColor": {
+      "type": "string",
+      "description": "Cell color for days without contributions.",
+      "default": "#21262d"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 720, "h": 140,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 17, "y": 14, "w": 400, "h": 16,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "preview-strip",
+      "type": "rect",
+      "x": 17, "y": 40, "w": 686, "h": 76,
+      "style": { "fill": "{{props.emptyColor}}", "radius": 4 }
+    },
+    {
+      "id": "legend-caption",
+      "type": "text",
+      "x": 17, "y": 121, "w": 60, "h": 14,
+      "text": "Less",
+      "style": { "fontSize": 10, "fontWeight": 400, "color": "#7d8590" }
+    },
+    {
+      "id": "legend-l0",
+      "type": "rect",
+      "x": 50, "y": 123, "w": 10, "h": 10,
+      "style": { "fill": "{{props.emptyColor}}", "radius": 2 }
+    },
+    {
+      "id": "legend-l1",
+      "type": "rect",
+      "x": 63, "y": 123, "w": 10, "h": 10,
+      "style": { "fill": "#0e4429", "radius": 2 }
+    },
+    {
+      "id": "legend-l2",
+      "type": "rect",
+      "x": 76, "y": 123, "w": 10, "h": 10,
+      "style": { "fill": "#006d32", "radius": 2 }
+    },
+    {
+      "id": "legend-l3",
+      "type": "rect",
+      "x": 89, "y": 123, "w": 10, "h": 10,
+      "style": { "fill": "#26a641", "radius": 2 }
+    },
+    {
+      "id": "legend-l4",
+      "type": "rect",
+      "x": 102, "y": 123, "w": 10, "h": 10,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "legend-caption-more",
+      "type": "text",
+      "x": 117, "y": 121, "w": 60, "h": 14,
+      "text": "More",
+      "style": { "fontSize": 10, "fontWeight": 400, "color": "#7d8590" }
+    }
+  ]
+}

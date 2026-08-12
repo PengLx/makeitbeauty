@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://makeitbeauty.dev/schemas/kit-component.v0.json",
   "title": "MakeItBeauty kit component (v0)",
-  "description": "A declarative, parameterized design fragment, referenced from designs as \"kit/{id}\". Nodes are design-schema nodes positioned relative to the frame; {{props.*}} slots resolve with the standard template engine; computed entries map a numeric prop linearly onto node geometry (prop × scale, clamped) — no code execution. Nested instance nodes are not allowed (v0). This file is the contract for packages/kit/components.",
+  "description": "A declarative, parameterized design fragment, referenced from designs as \"kit/{id}\". Nodes are design-schema nodes positioned relative to the frame; {{props.*}} slots resolve with the standard template engine; computed entries map a numeric prop linearly onto node geometry (prop × scale, clamped) — no code execution. Nested instance nodes are not allowed (v0). Two variants (see if/else): declarative (nodes required — they ARE the component; native/dataFields absent) and native (native: true + dataFields — a TRUSTED generator inside the renderer produces the render nodes from (props, data, frame); array-driven visuals like a 53×7 contribution heatmap cannot be expressed declaratively; declared nodes are only the static palette preview, so [] or absent is fine). Native components ship with MakeItBeauty itself: community publish validation rejects native/dataFields. This file is the contract for packages/kit/components.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "title", "frame", "props", "nodes"],
+  "required": ["id", "title", "frame", "props"],
   "properties": {
     "id": {
       "type": "string",
@@ -34,16 +34,43 @@
     },
     "nodes": {
       "type": "array",
-      "minItems": 1,
       "maxItems": 64,
-      "description": "Design-schema fragment, positioned relative to the frame — (0,0) is the component's own top-left corner.",
+      "description": "Design-schema fragment, positioned relative to the frame — (0,0) is the component's own top-left corner. Required (min 1) for declarative components; for native components it is only the static palette preview and may be [] or absent (see if/else).",
       "items": { "$ref": "#/$defs/fragmentNode" }
     },
     "computed": {
       "type": "array",
       "maxItems": 32,
       "items": { "$ref": "#/$defs/computedEntry" }
+    },
+    "native": {
+      "const": true,
+      "description": "Official-kit only: the renderer produces this component's nodes with a trusted generator from (props, data, frame) — array-driven visuals (heatmap cells, language bars) that declarative fragments cannot express. The declared nodes remain as the static fallback/palette preview. Community publish validation rejects this flag; declaring it requires dataFields."
+    },
+    "dataFields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+$",
+        "maxLength": 128
+      },
+      "description": "Connector snapshot paths (e.g. \"stats.calendar\") a native component consumes directly — no {{templates}} involved. Binding derivation unions these into the design's connector binding (v0: the github connector) for every instance of the component, so the consent record stays complete."
     }
+  },
+  "dependentRequired": {
+    "native": ["dataFields"],
+    "dataFields": ["native"]
+  },
+  "if": { "required": ["native"] },
+  "then": {
+    "description": "Native component: the renderer's trusted generator supplies the render nodes, so declared nodes are only the static palette preview — [] or absent is fine."
+  },
+  "else": {
+    "required": ["nodes"],
+    "properties": { "nodes": { "minItems": 1 } },
+    "description": "Declarative component: the nodes ARE the component — required, at least one."
   },
   "$defs": {
     "propDecl": {

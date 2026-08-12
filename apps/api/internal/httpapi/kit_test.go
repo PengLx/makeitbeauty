@@ -21,6 +21,7 @@ func testConfig() config.Config { return config.Config{Env: "test"} }
 func TestHandleKitHTTP(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := NewServer(testConfig(), log, Deps{Stores: store.NewMemory(), Kit: []kit.Component{
+		{ID: "kit/contribution-heatmap", Title: "Contribution heatmap", Frame: kit.Frame{W: 720, H: 140}, Props: json.RawMessage(`{}`), Native: true, DataFields: []string{"stats.calendar"}},
 		{ID: "kit/progress-bar", Title: "Progress bar", Frame: kit.Frame{W: 260, H: 32}, Props: json.RawMessage(`{}`)},
 		{ID: "kit/stat-card", Title: "Stat card", Description: "A headline metric.", Frame: kit.Frame{W: 260, H: 140}, Props: json.RawMessage(`{"label":{"type":"string"}}`)},
 	}})
@@ -45,17 +46,20 @@ func TestHandleKitHTTP(t *testing.T) {
 		Description string                 `json:"description"`
 		Frame       struct{ W, H float64 } `json:"frame"`
 		Props       json.RawMessage        `json:"props"`
+		Native      bool                   `json:"native"`
+		DataFields  []string               `json:"dataFields"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &components); err != nil {
 		t.Fatalf("body is not a JSON array: %v (body: %s)", err, rec.Body.String())
 	}
-	if len(components) != 2 {
-		t.Fatalf("got %d components, want 2", len(components))
+	if len(components) != 3 {
+		t.Fatalf("got %d components, want 3", len(components))
 	}
-	if components[0].ID != "kit/progress-bar" || components[1].ID != "kit/stat-card" {
-		t.Errorf("ids = [%s, %s], want sorted [kit/progress-bar, kit/stat-card]", components[0].ID, components[1].ID)
+	if components[0].ID != "kit/contribution-heatmap" || components[1].ID != "kit/progress-bar" || components[2].ID != "kit/stat-card" {
+		t.Errorf("ids = [%s, %s, %s], want sorted [kit/contribution-heatmap, kit/progress-bar, kit/stat-card]",
+			components[0].ID, components[1].ID, components[2].ID)
 	}
-	c := components[1]
+	c := components[2]
 	if c.Title != "Stat card" || c.Description != "A headline metric." {
 		t.Errorf("title/description = %q/%q, want Stat card/A headline metric.", c.Title, c.Description)
 	}
@@ -65,13 +69,31 @@ func TestHandleKitHTTP(t *testing.T) {
 	if string(c.Props) != `{"label":{"type":"string"}}` {
 		t.Errorf("props = %s, want the raw object passed through", c.Props)
 	}
-	// Optional description is omitted, not "".
+	// Native metadata passes through so the editor can label natives and
+	// show their auto-consumed fields.
+	native := components[0]
+	if !native.Native {
+		t.Error("kit/contribution-heatmap native = false, want true")
+	}
+	if len(native.DataFields) != 1 || native.DataFields[0] != "stats.calendar" {
+		t.Errorf("kit/contribution-heatmap dataFields = %v, want [stats.calendar]", native.DataFields)
+	}
+	// Optional fields are omitted, not zero-valued: no description on
+	// components[1], no native/dataFields keys on declarative components.
 	var raw []map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatal(err)
 	}
-	if _, present := raw[0]["description"]; present {
+	if _, present := raw[1]["description"]; present {
 		t.Error("description should be omitted when empty")
+	}
+	for _, i := range []int{1, 2} {
+		if _, present := raw[i]["native"]; present {
+			t.Errorf("components[%d]: native should be omitted on declarative components", i)
+		}
+		if _, present := raw[i]["dataFields"]; present {
+			t.Errorf("components[%d]: dataFields should be omitted on declarative components", i)
+		}
 	}
 }
 

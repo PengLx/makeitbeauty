@@ -21,7 +21,8 @@ type Frame struct {
 }
 
 // Component is the palette metadata of one kit component
-// ([{id: "kit/stat-card", title, description?, frame, props}]).
+// ([{id: "kit/stat-card", title, description?, frame, props, native?,
+// dataFields?}]).
 type Component struct {
 	// ID is the registry id: "kit/" + the file's id field.
 	ID          string `json:"id"`
@@ -30,6 +31,15 @@ type Component struct {
 	Frame       Frame  `json:"frame"`
 	// Props is the file's prop-declaration object, passed through verbatim.
 	Props json.RawMessage `json:"props"`
+	// Native marks a component whose nodes are produced by a trusted
+	// generator in the renderer from (props, data, frame) — official kit
+	// only. /v1/kit passes it through so the editor can label natives.
+	Native bool `json:"native,omitempty"`
+	// DataFields are the connector snapshot paths a native component
+	// consumes directly (e.g. "stats.calendar"). Binding derivation unions
+	// them into the design's github binding for every instance of the
+	// component (v0: natives are fixed to the github connector).
+	DataFields []string `json:"dataFields,omitempty"`
 }
 
 // ResolveDir returns an existing directory path for p. Like fixture.Resolve,
@@ -110,6 +120,8 @@ func parseFile(path string) (Component, error) {
 		Description string          `json:"description"`
 		Frame       Frame           `json:"frame"`
 		Props       json.RawMessage `json:"props"`
+		Native      bool            `json:"native"`
+		DataFields  []string        `json:"dataFields"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return Component{}, fmt.Errorf("invalid JSON: %w", err)
@@ -123,6 +135,14 @@ func parseFile(path string) (Component, error) {
 	if raw.Frame.W <= 0 || raw.Frame.H <= 0 {
 		return Component{}, fmt.Errorf("frame.w and frame.h must be positive")
 	}
+	// Mirror the schema's dependentRequired: native and dataFields imply
+	// each other (kit-component.schema.json).
+	if raw.Native && len(raw.DataFields) == 0 {
+		return Component{}, fmt.Errorf("native component must declare dataFields")
+	}
+	if !raw.Native && len(raw.DataFields) > 0 {
+		return Component{}, fmt.Errorf("dataFields requires native: true")
+	}
 	props := raw.Props
 	if len(props) == 0 {
 		props = json.RawMessage("{}") // a component may declare no props
@@ -133,6 +153,8 @@ func parseFile(path string) (Component, error) {
 		Description: raw.Description,
 		Frame:       raw.Frame,
 		Props:       props,
+		Native:      raw.Native,
+		DataFields:  raw.DataFields,
 	}, nil
 }
 

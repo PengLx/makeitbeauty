@@ -1,0 +1,53 @@
+{
+  "id": "language-bar",
+  "title": "Language bar",
+  "description": "Top languages as a stacked horizontal bar with a legend, star-weighted across owned repositories. Native component — the renderer generates the segments from stats.topLanguages; the nodes below are the static palette preview.",
+  "native": true,
+  "dataFields": ["stats.topLanguages"],
+  "frame": { "w": 720, "h": 110 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the bar.",
+      "default": "TOP LANGUAGES"
+    },
+    "trackColor": {
+      "type": "string",
+      "description": "Color of the unfilled remainder of the bar.",
+      "default": "#21262d"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 720, "h": 110,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 16, "w": 400, "h": 16,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "track",
+      "type": "rect",
+      "x": 20, "y": 44, "w": 680, "h": 14,
+      "style": { "fill": "{{props.trackColor}}", "radius": 7 }
+    },
+    {
+      "id": "legend",
+      "type": "text",
+      "x": 20, "y": 74, "w": 680, "h": 18,
+      "text": "Bind a GitHub account to fill this bar",
+      "style": { "fontSize": 12, "fontWeight": 400, "color": "#7d8590" }
+    }
+  ]
+}

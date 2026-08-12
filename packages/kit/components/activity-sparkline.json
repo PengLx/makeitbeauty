@@ -1,0 +1,117 @@
+{
+  "id": "activity-sparkline",
+  "title": "Activity sparkline",
+  "description": "The last 84 days of commit activity as 12 weekly bars with a staggered growY entrance and an optional peak-week label. Native component — the renderer generates the bars from stats.calendar; the nodes below are the static palette preview.",
+  "native": true,
+  "dataFields": ["stats.calendar"],
+  "frame": { "w": 360, "h": 100 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the bars.",
+      "default": "ACTIVITY"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Bar color for weeks with activity.",
+      "default": "#58a6ff"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    },
+    "peakLabel": {
+      "type": "number",
+      "description": "1 shows the busiest week's total as a small top-right label; 0 hides it.",
+      "default": 1
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 360, "h": 100,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 16, "y": 12, "w": 200, "h": 15,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 11, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "pv0",
+      "type": "rect",
+      "x": 16, "y": 72, "w": 20, "h": 14,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv1",
+      "type": "rect",
+      "x": 44, "y": 64, "w": 20, "h": 22,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv2",
+      "type": "rect",
+      "x": 72, "y": 68, "w": 20, "h": 18,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv3",
+      "type": "rect",
+      "x": 100, "y": 58, "w": 20, "h": 28,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv4",
+      "type": "rect",
+      "x": 128, "y": 62, "w": 20, "h": 24,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv5",
+      "type": "rect",
+      "x": 156, "y": 52, "w": 20, "h": 34,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv6",
+      "type": "rect",
+      "x": 184, "y": 60, "w": 20, "h": 26,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv7",
+      "type": "rect",
+      "x": 212, "y": 48, "w": 20, "h": 38,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv8",
+      "type": "rect",
+      "x": 240, "y": 56, "w": 20, "h": 30,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv9",
+      "type": "rect",
+      "x": 268, "y": 44, "w": 20, "h": 42,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv10",
+      "type": "rect",
+      "x": 296, "y": 52, "w": 20, "h": 34,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv11",
+      "type": "rect",
+      "x": 324, "y": 34, "w": 20, "h": 52,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    }
+  ]
+}
