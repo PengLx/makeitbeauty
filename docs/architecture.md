@@ -175,6 +175,37 @@ DeployToken      { id, projectId, hash, createdAt, revokedAt? }
 Snapshot         { userId, connector, data, fetchedAt, ttlSeconds }   (cache)
 ```
 
+### 7.5 Community components (declarative registry)
+
+A user component is the kit-component format (`kit-component.schema.json`) plus
+registry metadata — a design fragment with prop slots, `computed` mappings, and
+node animations. **No code, ever**: components render through the same trusted
+pipeline as the official kit, which is why strangers' components are safe to
+install (architecture §9.7 registry rules apply from day one).
+
+- **Namespace = owner's GitHub login, lowercased**: `{owner}/{name}`. The `kit/`
+  namespace is reserved for the official in-repo set.
+- **Drafts are mutable and private. Published versions are immutable**:
+  publishing freezes `{owner}/{name}@{n}` (auto-increment). Instances pin the
+  exact version; updating is opt-in per design — no silent auto-updates (a
+  malicious update is the top realistic registry attack).
+- **Publish-time validation is renderer-owned** (`POST /internal/validate-component`,
+  same ajv + semantic checks as the kit loader): schema conformance, no nested
+  instances, computed integrity, unique node ids, and **templates restricted to
+  `{{props.*}}`** — a component never references connector data directly; data
+  reaches it only through props the design author binds. This keeps the consent
+  model intact when using other people's components.
+- **Unpublish = unlist**: hidden from browse, but pinned usages keep rendering
+  (immutability beats deletion; abuse is a moderation action, not a 404).
+- **Render path stays stateless**: the API collects every non-kit component
+  version a design references and passes the definitions inside the render
+  request; the renderer merges them with the built-in kit registry per request.
+
+```
+Component        { id "{owner}/{name}", ownerId, title, description, latestVersion, unlisted, createdAt, updatedAt }
+ComponentVersion { componentId, version, definition, publishedAt }        — immutable
+```
+
 Storage: clean interfaces with two implementations — in-memory (tests) and a
 file-backed JSON store (`MIB_DATA_DIR`, default `./data`, gitignored) that makes
 dev and small self-host deployments durable with zero dependencies. Postgres is
@@ -205,6 +236,16 @@ with KMS-managed keys (see SECURITY.md).
 - `GET /v1/kit` — public kit component metadata for the editor palette:
   `[{id: "kit/stat-card", title, description?, frame: {w, h}, props}]`, served
   from `packages/kit/components`.
+- Components (§7.5): `GET /v1/components` (mine: drafts + published, session);
+  `POST /v1/components` `{name, title, frame}` → draft (session; id =
+  `{login}/{name}`); `PUT /v1/components/{owner}/{name}` update draft definition
+  (owner only; published versions are never mutated); `POST
+  /v1/components/{owner}/{name}/publish` → freezes the next immutable version
+  after renderer validation; `GET /v1/components/{owner}/{name}` metadata +
+  latest published definition (public when published);
+  `GET /v1/components/{owner}/{name}/versions/{n}` immutable definition (public);
+  `DELETE /v1/components/{owner}/{name}` unlist (owner);
+  `GET /v1/community/components?q=` browse published, newest first (public).
 - Auth (GitHub App user OAuth): `GET /v1/auth/github/login` → 302 to GitHub
   authorize (CSRF `state` in a short-lived cookie); `GET /v1/auth/github/callback`
   → code exchange (user token, 8h + refresh), upsert user, provision the GitHub

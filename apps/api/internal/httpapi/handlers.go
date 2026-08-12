@@ -156,10 +156,15 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	s.renderAndReply(w, r, req.Design, data, "")
 }
 
-// renderAndReply calls the renderer and streams the SVG (or the mapped error
-// envelope — always non-200 on failure).
+// renderAndReply resolves the design's pinned community components, calls the
+// renderer, and streams the SVG (or the mapped error envelope — always
+// non-200 on failure).
 func (s *Server) renderAndReply(w http.ResponseWriter, r *http.Request, design json.RawMessage, data map[string]any, theme string) {
-	result, err := s.renderer.Render(r.Context(), design, data, theme)
+	components, ok := s.resolveDesignComponents(w, r, design)
+	if !ok {
+		return
+	}
+	result, err := s.renderer.Render(r.Context(), design, data, theme, components)
 	if err != nil {
 		var re *render.Error
 		if errors.As(err, &re) {

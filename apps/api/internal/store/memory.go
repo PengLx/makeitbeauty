@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 )
@@ -13,6 +14,8 @@ func NewMemory() Stores {
 		Projects:          &memProjects{m: map[string]*Project{}},
 		DeployTokens:      &memDeployTokens{byProject: map[string][]*DeployToken{}},
 		ConnectorAccounts: &memConnectorAccounts{m: map[string]*ConnectorAccount{}},
+		Components:        &memComponents{m: map[string]*Component{}},
+		ComponentVersions: &memComponentVersions{byComponent: map[string][]*ComponentVersion{}},
 	}
 }
 
@@ -162,6 +165,111 @@ func (s *memDeployTokens) Revoke(_ context.Context, projectID, tokenID string, a
 		}
 	}
 	return ErrNotFound
+}
+
+type memComponents struct {
+	mu sync.RWMutex
+	m  map[string]*Component
+}
+
+func (s *memComponents) Create(_ context.Context, c *Component) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[c.ID]; ok {
+		return ErrExists
+	}
+	cp := *c
+	s.m[c.ID] = &cp
+	return nil
+}
+
+func (s *memComponents) Get(_ context.Context, id string) (*Component, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	c, ok := s.m[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (s *memComponents) ListByOwner(_ context.Context, ownerID string) ([]*Component, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*Component{}
+	for _, c := range s.m {
+		if c.OwnerID == ownerID {
+			cp := *c
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *memComponents) List(_ context.Context) ([]*Component, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*Component{}
+	for _, c := range s.m {
+		cp := *c
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (s *memComponents) Update(_ context.Context, c *Component) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[c.ID]; !ok {
+		return ErrNotFound
+	}
+	cp := *c
+	s.m[c.ID] = &cp
+	return nil
+}
+
+type memComponentVersions struct {
+	mu          sync.RWMutex
+	byComponent map[string][]*ComponentVersion
+}
+
+func (s *memComponentVersions) Create(_ context.Context, v *ComponentVersion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.byComponent[v.ComponentID] {
+		if existing.Version == v.Version {
+			return ErrExists // versions are immutable, never replaced
+		}
+	}
+	cp := *v
+	s.byComponent[v.ComponentID] = append(s.byComponent[v.ComponentID], &cp)
+	return nil
+}
+
+func (s *memComponentVersions) Get(_ context.Context, componentID string, version int) (*ComponentVersion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.byComponent[componentID] {
+		if v.Version == version {
+			cp := *v
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *memComponentVersions) ListByComponent(_ context.Context, componentID string) ([]*ComponentVersion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.byComponent[componentID]
+	out := make([]*ComponentVersion, 0, len(src))
+	for _, v := range src {
+		cp := *v
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, nil
 }
 
 type memConnectorAccounts struct {

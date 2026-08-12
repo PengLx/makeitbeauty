@@ -54,7 +54,11 @@ export interface KitComponent {
   computed?: ComputedEntry[];
 }
 
-/** A kit component failed validation — a boot-time programming error, not user input. */
+/**
+ * A component definition failed validation. For the official kit this is a
+ * boot-time programming error; for community definitions (§7.5) it is user
+ * input the HTTP layer maps to an error response.
+ */
 export class KitError extends Error {
   constructor(message: string) {
     super(message);
@@ -78,12 +82,10 @@ ajv.addSchema(designSchema);
 const validateFn: ValidateFunction<KitComponent> = ajv.compile<KitComponent>(kitSchema);
 
 /**
- * Validate one raw component (schema + semantic checks) or throw KitError.
- * `context` names the source (filename) in error messages.
+ * The one structural v0 rule, checked ahead of ajv (whose oneOf error is
+ * opaque) so it gets a clear message.
  */
-export function parseKitComponent(raw: unknown, context: string): KitComponent {
-  // Ahead of ajv (whose oneOf error is opaque) so the one structural v0 rule
-  // gets a clear message.
+function assertNoNestedInstance(raw: unknown, context: string): void {
   const rawNodes = (raw as { nodes?: unknown } | null)?.nodes;
   if (
     Array.isArray(rawNodes) &&
@@ -91,15 +93,14 @@ export function parseKitComponent(raw: unknown, context: string): KitComponent {
   ) {
     throw new KitError(`${context}: nested instance nodes are not supported in kit v0`);
   }
+}
 
-  if (!validateFn(raw)) {
-    const errors = (validateFn.errors ?? []).map(
-      (e) => `${e.instancePath || "/"}: ${e.message ?? "invalid"}`,
-    );
-    throw new KitError(`${context}: invalid kit component:\n  ${errors.join("\n  ")}`);
-  }
-  const component = raw;
-
+/**
+ * Semantic checks shared by the kit loader and community validation (§7.5):
+ * unique node ids + computed integrity (known node, declared number prop,
+ * ordered clamp).
+ */
+function assertComponentSemantics(component: KitComponent, context: string): void {
   const ids = new Set<string>();
   for (const node of component.nodes) {
     if (ids.has(node.id)) throw new KitError(`${context}: duplicate node id "${node.id}"`);
@@ -120,6 +121,23 @@ export function parseKitComponent(raw: unknown, context: string): KitComponent {
       throw new KitError(`${context}: computed clamp [${entry.clamp.join(", ")}] has min > max`);
     }
   }
+}
+
+/**
+ * Validate one raw component (schema + semantic checks) or throw KitError.
+ * `context` names the source (filename) in error messages.
+ */
+export function parseKitComponent(raw: unknown, context: string): KitComponent {
+  assertNoNestedInstance(raw, context);
+
+  if (!validateFn(raw)) {
+    const errors = (validateFn.errors ?? []).map(
+      (e) => `${e.instancePath || "/"}: ${e.message ?? "invalid"}`,
+    );
+    throw new KitError(`${context}: invalid kit component:\n  ${errors.join("\n  ")}`);
+  }
+  const component = raw;
+  assertComponentSemantics(component, context);
   return component;
 }
 
@@ -147,6 +165,192 @@ let cachedRegistry: Map<string, KitComponent> | null = null;
 export function kitRegistry(): ReadonlyMap<string, KitComponent> {
   cachedRegistry ??= loadKitRegistry();
   return cachedRegistry;
+}
+
+// ---------------------------------------------------------------------------
+// Community components (architecture.md §7.5)
+//
+// A community definition is the same kit-component document with a namespaced
+// id — "{owner}/{name}" while a draft is being published, "{owner}/{name}@{n}"
+// once pinned inside a render request. The registry stays out of the renderer:
+// the API passes every non-kit definition a design references in the render
+// request's components[], and they merge with the built-in kit per request.
+// ---------------------------------------------------------------------------
+
+/** "{owner}/{name}" with an optional "@{version}" pin (design.schema.json instance refs). */
+const COMMUNITY_ID_RE = /^[a-z0-9-]+\/[a-z0-9-]+(@[0-9]+)?$/;
+
+// Same document format, community id shape. The clone keeps the $id in the
+// same schema directory so the relative design.v0.json $refs still resolve.
+const communitySchema = structuredClone(kitSchema) as {
+  $id: string;
+  properties: { id: Record<string, unknown> };
+};
+communitySchema.$id = "https://makeitbeauty.dev/schemas/community-component.v0.json";
+communitySchema.properties.id = {
+  type: "string",
+  pattern: COMMUNITY_ID_RE.source,
+  maxLength: 128,
+  description:
+    'Fully-qualified community component id: "{owner}/{name}" or "{owner}/{name}@{version}".',
+};
+
+const validateCommunityFn: ValidateFunction<KitComponent> =
+  ajv.compile<KitComponent>(communitySchema);
+
+// Mirrors template.ts TEMPLATE_RE — the exact syntax the engine resolves.
+const TEMPLATE_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
+
+/**
+ * §7.5 publish rule: every {{template}} inside a community definition must
+ * reference props.* — a component never touches connector data directly; data
+ * reaches it only through props the design author binds, which keeps the
+ * consent model intact when using other people's components. Throws on the
+ * first violation; a reference to an undeclared prop is only a warning (it
+ * resolves to the em-dash placeholder at render time).
+ */
+function checkPropsOnlyTemplates(
+  value: unknown,
+  path: string,
+  component: KitComponent,
+  context: string,
+  warnings: string[],
+): void {
+  if (typeof value === "string") {
+    for (const match of value.matchAll(TEMPLATE_RE)) {
+      const ref = match[1].trim();
+      const segments = ref.split(".");
+      if (segments[0] !== "props" || segments.length < 2 || segments[1] === "") {
+        throw new KitError(
+          `${context}: ${path}: template "{{${ref}}}" is not allowed — community component ` +
+            `templates may only reference props.* (bind data to a prop in the design instead)`,
+        );
+      }
+      if (!(segments[1] in component.props)) {
+        warnings.push(`${context}: ${path}: template references undeclared prop "${segments[1]}"`);
+      }
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, i) =>
+      checkPropsOnlyTemplates(item, `${path}[${i}]`, component, context, warnings),
+    );
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      checkPropsOnlyTemplates(item, path ? `${path}.${key}` : key, component, context, warnings);
+    }
+  }
+}
+
+export interface CommunityParseOptions {
+  /** Render-request definitions must pin a published version ("@{n}"); publish-time drafts need not. */
+  requireVersion?: boolean;
+}
+
+export interface ParsedCommunityComponent {
+  component: KitComponent;
+  warnings: string[];
+}
+
+/**
+ * Validate one community component definition — the full kit-loader suite
+ * (ajv schema + nested-instance rejection + unique node ids + computed
+ * integrity) PLUS the §7.5 props-only template rule. Throws KitError with the
+ * first failure's precise reason. This runs at publish (via
+ * POST /internal/validate-component) and again on every render request:
+ * defense in depth, the renderer never trusts that the API already checked.
+ */
+export function parseCommunityComponent(
+  raw: unknown,
+  context: string,
+  options: CommunityParseOptions = {},
+): ParsedCommunityComponent {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new KitError(`${context}: definition must be a JSON object`);
+  }
+
+  // Id shape ahead of ajv so the most likely mistakes get precise messages.
+  const id = (raw as { id?: unknown }).id;
+  if (typeof id !== "string" || !COMMUNITY_ID_RE.test(id)) {
+    throw new KitError(
+      `${context}: id must be "{owner}/{name}" or "{owner}/{name}@{version}" ` +
+        `(got ${JSON.stringify(id)})`,
+    );
+  }
+  if (id.startsWith("kit/")) {
+    throw new KitError(
+      `${context}: the "kit/" namespace is reserved for the official kit (got "${id}")`,
+    );
+  }
+  if (options.requireVersion && !id.includes("@")) {
+    throw new KitError(
+      `${context}: render-request definitions must pin a published version ` +
+        `("{owner}/{name}@{n}", got "${id}")`,
+    );
+  }
+
+  assertNoNestedInstance(raw, context);
+
+  if (!validateCommunityFn(raw)) {
+    const errors = (validateCommunityFn.errors ?? []).map(
+      (e) => `${e.instancePath || "/"}: ${e.message ?? "invalid"}`,
+    );
+    throw new KitError(`${context}: invalid component:\n  ${errors.join("\n  ")}`);
+  }
+  const component = raw as unknown as KitComponent;
+  assertComponentSemantics(component, context);
+
+  const warnings: string[] = [];
+  checkPropsOnlyTemplates(component, "", component, context, warnings);
+  return { component, warnings };
+}
+
+/**
+ * Validate a renderRequest's components[] (render.schema.json): each item is
+ * a community definition pinned to "{owner}/{name}@{n}", ids unique within
+ * the request. Throws KitError on the first violation.
+ */
+export function parseRequestComponents(raw: unknown): {
+  components: KitComponent[];
+  warnings: string[];
+} {
+  if (raw === undefined) return { components: [], warnings: [] };
+  if (!Array.isArray(raw)) {
+    throw new KitError('"components" must be an array of component definitions');
+  }
+  const components: KitComponent[] = [];
+  const warnings: string[] = [];
+  const seen = new Set<string>();
+  for (const [i, item] of raw.entries()) {
+    const parsed = parseCommunityComponent(item, `components[${i}]`, { requireVersion: true });
+    if (seen.has(parsed.component.id)) {
+      throw new KitError(`components[${i}]: duplicate definition for "${parsed.component.id}"`);
+    }
+    seen.add(parsed.component.id);
+    components.push(parsed.component);
+    warnings.push(...parsed.warnings);
+  }
+  return { components, warnings };
+}
+
+/**
+ * Per-request expansion lookup: request definitions (keyed by their fully-
+ * qualified id) merged UNDER the built-in kit registry — kit entries always
+ * win on a key collision, and the module-level registry is never touched, so
+ * concurrent renders stay isolated and deterministic.
+ */
+export function mergeComponentRegistry(
+  kit: ReadonlyMap<string, KitComponent>,
+  requestComponents: readonly KitComponent[],
+): ReadonlyMap<string, KitComponent> {
+  if (requestComponents.length === 0) return kit;
+  const merged = new Map<string, KitComponent>();
+  for (const component of requestComponents) merged.set(component.id, component);
+  for (const [key, component] of kit) merged.set(key, component); // kit wins
+  return merged;
 }
 
 export interface Expansion {

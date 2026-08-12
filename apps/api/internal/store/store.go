@@ -14,6 +14,11 @@ import (
 // ErrNotFound is returned by Get-style methods when no row matches.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrExists is returned by Create-style methods when a row with the same key
+// already exists and the collection refuses overwrites (component ids,
+// immutable component versions).
+var ErrExists = errors.New("store: already exists")
+
 // User is an account holder (data model v0, architecture.md §7). GitHub-born
 // users are keyed on the immutable numeric GitHub id (logins can change);
 // GitHubID stays 0 for the implicit dev user.
@@ -83,6 +88,31 @@ func HashToken(token string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(token))
 }
 
+// Component is one community-registry component (architecture.md §7.5):
+// registry metadata plus the owner's mutable, private draft definition.
+// Published versions live in ComponentVersion and never change.
+type Component struct {
+	ID            string // "{owner}/{name}", owner = login lowercased
+	OwnerID       string // User.ID of the owner
+	Title         string
+	Description   string
+	Draft         json.RawMessage // working definition (kit-component shape)
+	LatestVersion int             // 0 == never published
+	Unlisted      bool            // hidden from browse; pinned versions still serve
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// ComponentVersion is one frozen publish of a component. Immutable by
+// contract: the store interface exposes no update or delete for versions —
+// pinned usages must keep rendering forever (architecture.md §7.5).
+type ComponentVersion struct {
+	ComponentID string          // Component.ID
+	Version     int             // 1, 2, 3, ... (auto-increment at publish)
+	Definition  json.RawMessage // kit-component document, id = "{owner}/{name}@{n}"
+	PublishedAt time.Time
+}
+
 // Users persists accounts.
 type Users interface {
 	Create(ctx context.Context, u *User) error
@@ -132,10 +162,43 @@ type ConnectorAccounts interface {
 	Update(ctx context.Context, a *ConnectorAccount) error
 }
 
+// Components persists community-component registry entries (metadata +
+// draft). Frozen publishes live in ComponentVersions.
+type Components interface {
+	// Create adds a new component. Returns ErrExists if the id is taken —
+	// component ids are permanent namespace claims, never overwritten.
+	Create(ctx context.Context, c *Component) error
+	Get(ctx context.Context, id string) (*Component, error)
+	ListByOwner(ctx context.Context, ownerID string) ([]*Component, error)
+	// List returns every component; browse filtering (published, listed, q)
+	// is the caller's job.
+	List(ctx context.Context) ([]*Component, error)
+	// Update replaces the stored component with c (matched by c.ID): draft
+	// edits, publish bookkeeping (LatestVersion), unlisting. Returns
+	// ErrNotFound if no such component exists.
+	Update(ctx context.Context, c *Component) error
+}
+
+// ComponentVersions persists frozen component publishes. Deliberately no
+// Update or Delete: versions are immutable (architecture.md §7.5) and this
+// interface is where that guarantee is enforced structurally.
+type ComponentVersions interface {
+	// Create freezes one version. Returns ErrExists if
+	// (ComponentID, Version) is already taken — a frozen version can never
+	// be replaced.
+	Create(ctx context.Context, v *ComponentVersion) error
+	Get(ctx context.Context, componentID string, version int) (*ComponentVersion, error)
+	// ListByComponent returns all versions of a component, ascending by
+	// version; an unknown component yields an empty slice, not an error.
+	ListByComponent(ctx context.Context, componentID string) ([]*ComponentVersion, error)
+}
+
 // Stores bundles all persistence interfaces for wiring.
 type Stores struct {
 	Users             Users
 	Projects          Projects
 	DeployTokens      DeployTokens
 	ConnectorAccounts ConnectorAccounts
+	Components        Components
+	ComponentVersions ComponentVersions
 }

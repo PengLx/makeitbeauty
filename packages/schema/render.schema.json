@@ -21,6 +21,11 @@
           "properties": {
             "theme": { "enum": ["auto", "light", "dark"], "default": "auto" }
           }
+        },
+        "components": {
+          "type": "array",
+          "description": "Community component definitions the design references, resolved by the API (registry stays out of the renderer — it remains a pure function). Each item is a kit-component document (see kit-component.schema.json) whose id is the fully-qualified pinned reference, e.g. \"penglx/glow-card@3\". Merged over the built-in kit registry for this request only.",
+          "items": { "type": "object" }
         }
       }
     },

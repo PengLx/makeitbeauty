@@ -13,7 +13,8 @@ import (
 )
 
 // NewFile returns Stores backed by one JSON file per entity collection under
-// dir (users.json, projects.json, deploy_tokens.json, connector_accounts.json).
+// dir (users.json, projects.json, deploy_tokens.json, connector_accounts.json,
+// components.json, component_versions.json).
 // The directory is created on demand (0700), existing files are loaded on
 // boot, and every mutation rewrites the affected collection atomically
 // (temp file + rename), so a crash mid-write never corrupts data. This makes
@@ -24,11 +25,13 @@ func NewFile(dir string) (Stores, error) {
 		return Stores{}, fmt.Errorf("store: creating data dir %q: %w", dir, err)
 	}
 	db := &fileDB{
-		dir:      dir,
-		users:    map[string]*User{},
-		projects: map[string]*Project{},
-		tokens:   map[string][]*DeployToken{},
-		accounts: map[string]*ConnectorAccount{},
+		dir:        dir,
+		users:      map[string]*User{},
+		projects:   map[string]*Project{},
+		tokens:     map[string][]*DeployToken{},
+		accounts:   map[string]*ConnectorAccount{},
+		components: map[string]*Component{},
+		versions:   map[string][]*ComponentVersion{},
 	}
 	if err := db.load(); err != nil {
 		return Stores{}, err
@@ -38,6 +41,8 @@ func NewFile(dir string) (Stores, error) {
 		Projects:          &fileProjects{db},
 		DeployTokens:      &fileDeployTokens{db},
 		ConnectorAccounts: &fileConnectorAccounts{db},
+		Components:        &fileComponents{db},
+		ComponentVersions: &fileComponentVersions{db},
 	}, nil
 }
 
@@ -48,10 +53,12 @@ func NewFile(dir string) (Stores, error) {
 // format independently of wire-format choices.
 
 const (
-	usersFile    = "users.json"
-	projectsFile = "projects.json"
-	tokensFile   = "deploy_tokens.json"
-	accountsFile = "connector_accounts.json"
+	usersFile      = "users.json"
+	projectsFile   = "projects.json"
+	tokensFile     = "deploy_tokens.json"
+	accountsFile   = "connector_accounts.json"
+	componentsFile = "components.json"
+	versionsFile   = "component_versions.json"
 )
 
 type projectRecord struct {
@@ -82,17 +89,38 @@ type accountRecord struct {
 	LastRefreshAt        time.Time `json:"lastRefreshAt"`
 }
 
+type componentRecord struct {
+	ID            string          `json:"id"`
+	OwnerID       string          `json:"ownerId"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description,omitempty"`
+	Draft         json.RawMessage `json:"draft"`
+	LatestVersion int             `json:"latestVersion"`
+	Unlisted      bool            `json:"unlisted,omitempty"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
+}
+
+type componentVersionRecord struct {
+	ComponentID string          `json:"componentId"`
+	Version     int             `json:"version"`
+	Definition  json.RawMessage `json:"definition"`
+	PublishedAt time.Time       `json:"publishedAt"`
+}
+
 // ---- shared database ----------------------------------------------------
 
 // fileDB holds all collections in memory under one mutex; files are the
 // durable copy, rewritten per collection on every mutation.
 type fileDB struct {
-	mu       sync.RWMutex
-	dir      string
-	users    map[string]*User
-	projects map[string]*Project
-	tokens   map[string][]*DeployToken // keyed by projectID
-	accounts map[string]*ConnectorAccount
+	mu         sync.RWMutex
+	dir        string
+	users      map[string]*User
+	projects   map[string]*Project
+	tokens     map[string][]*DeployToken // keyed by projectID
+	accounts   map[string]*ConnectorAccount
+	components map[string]*Component
+	versions   map[string][]*ComponentVersion // keyed by componentID
 }
 
 func (db *fileDB) load() error {
@@ -140,6 +168,29 @@ func (db *fileDB) load() error {
 			EncryptedCredentials: rec.EncryptedCredentials,
 			Status:               rec.Status, LastRefreshAt: rec.LastRefreshAt,
 		}
+	}
+
+	var components []componentRecord
+	if err := db.readFile(componentsFile, &components); err != nil {
+		return err
+	}
+	for _, rec := range components {
+		db.components[rec.ID] = &Component{
+			ID: rec.ID, OwnerID: rec.OwnerID, Title: rec.Title, Description: rec.Description,
+			Draft: rec.Draft, LatestVersion: rec.LatestVersion, Unlisted: rec.Unlisted,
+			CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
+		}
+	}
+
+	var versions []componentVersionRecord
+	if err := db.readFile(versionsFile, &versions); err != nil {
+		return err
+	}
+	for _, rec := range versions {
+		db.versions[rec.ComponentID] = append(db.versions[rec.ComponentID], &ComponentVersion{
+			ComponentID: rec.ComponentID, Version: rec.Version,
+			Definition: rec.Definition, PublishedAt: rec.PublishedAt,
+		})
 	}
 	return nil
 }
@@ -238,6 +289,38 @@ func (db *fileDB) persistTokens() error {
 		return out[i].ID < out[j].ID
 	})
 	return db.writeFile(tokensFile, out)
+}
+
+func (db *fileDB) persistComponents() error {
+	out := make([]componentRecord, 0, len(db.components))
+	for _, c := range db.components {
+		out = append(out, componentRecord{
+			ID: c.ID, OwnerID: c.OwnerID, Title: c.Title, Description: c.Description,
+			Draft: c.Draft, LatestVersion: c.LatestVersion, Unlisted: c.Unlisted,
+			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return db.writeFile(componentsFile, out)
+}
+
+func (db *fileDB) persistVersions() error {
+	out := []componentVersionRecord{}
+	for _, list := range db.versions {
+		for _, v := range list {
+			out = append(out, componentVersionRecord{
+				ComponentID: v.ComponentID, Version: v.Version,
+				Definition: v.Definition, PublishedAt: v.PublishedAt,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ComponentID != out[j].ComponentID {
+			return out[i].ComponentID < out[j].ComponentID
+		}
+		return out[i].Version < out[j].Version
+	})
+	return db.writeFile(versionsFile, out)
 }
 
 func (db *fileDB) persistAccounts() error {
@@ -393,6 +476,105 @@ func (s *fileDeployTokens) Revoke(_ context.Context, projectID, tokenID string, 
 		}
 	}
 	return ErrNotFound
+}
+
+type fileComponents struct{ db *fileDB }
+
+func (s *fileComponents) Create(_ context.Context, c *Component) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	if _, ok := s.db.components[c.ID]; ok {
+		return ErrExists
+	}
+	cp := *c
+	s.db.components[c.ID] = &cp
+	return s.db.persistComponents()
+}
+
+func (s *fileComponents) Get(_ context.Context, id string) (*Component, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	c, ok := s.db.components[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (s *fileComponents) ListByOwner(_ context.Context, ownerID string) ([]*Component, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	out := []*Component{}
+	for _, c := range s.db.components {
+		if c.OwnerID == ownerID {
+			cp := *c
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *fileComponents) List(_ context.Context) ([]*Component, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	out := []*Component{}
+	for _, c := range s.db.components {
+		cp := *c
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (s *fileComponents) Update(_ context.Context, c *Component) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	if _, ok := s.db.components[c.ID]; !ok {
+		return ErrNotFound
+	}
+	cp := *c
+	s.db.components[c.ID] = &cp
+	return s.db.persistComponents()
+}
+
+type fileComponentVersions struct{ db *fileDB }
+
+func (s *fileComponentVersions) Create(_ context.Context, v *ComponentVersion) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	for _, existing := range s.db.versions[v.ComponentID] {
+		if existing.Version == v.Version {
+			return ErrExists // versions are immutable, never replaced
+		}
+	}
+	cp := *v
+	s.db.versions[v.ComponentID] = append(s.db.versions[v.ComponentID], &cp)
+	return s.db.persistVersions()
+}
+
+func (s *fileComponentVersions) Get(_ context.Context, componentID string, version int) (*ComponentVersion, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	for _, v := range s.db.versions[componentID] {
+		if v.Version == version {
+			cp := *v
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *fileComponentVersions) ListByComponent(_ context.Context, componentID string) ([]*ComponentVersion, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	src := s.db.versions[componentID]
+	out := make([]*ComponentVersion, 0, len(src))
+	for _, v := range src {
+		cp := *v
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, nil
 }
 
 type fileConnectorAccounts struct{ db *fileDB }

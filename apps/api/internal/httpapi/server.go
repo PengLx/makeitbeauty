@@ -81,6 +81,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{id}/tokens", s.requireSession(s.handleCreateToken))
 	mux.HandleFunc("GET /v1/projects/{id}/tokens", s.requireSession(s.handleListTokens))
 	mux.HandleFunc("DELETE /v1/projects/{id}/tokens/{tokenId}", s.requireSession(s.handleRevokeToken))
+	// Community components (architecture.md §7.5/§8). Session routes first;
+	// the detail, pinned-version, and browse reads are public by contract
+	// (the detail route checks published/listed visibility itself).
+	mux.HandleFunc("POST /v1/components", s.requireSession(s.handleCreateComponent))
+	mux.HandleFunc("GET /v1/components", s.requireSession(s.handleListMyComponents))
+	mux.HandleFunc("PUT /v1/components/{owner}/{name}", s.requireSession(s.handleUpdateComponentDraft))
+	mux.HandleFunc("DELETE /v1/components/{owner}/{name}", s.requireSession(s.handleUnlistComponent))
+	mux.HandleFunc("POST /v1/components/{owner}/{name}/publish", s.requireSession(s.handlePublishComponent))
+	mux.HandleFunc("GET /v1/components/{owner}/{name}", s.handleGetComponent)
+	mux.HandleFunc("GET /v1/components/{owner}/{name}/versions/{n}", s.handleGetComponentVersion)
+	mux.HandleFunc("GET /v1/community/components", s.handleBrowseComponents)
 	mux.HandleFunc("GET /v1/auth/github/login", s.handleGitHubLogin)
 	mux.HandleFunc("GET /v1/auth/github/callback", s.handleGitHubCallback)
 	mux.HandleFunc("POST /v1/auth/logout", s.handleLogout)

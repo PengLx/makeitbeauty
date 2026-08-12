@@ -14,7 +14,7 @@ import {
   type RenderItem,
 } from "./animate.js";
 import type { LoadedFont } from "./fonts.js";
-import { expandInstance, kitRegistry } from "./kit.js";
+import { expandInstance, kitRegistry, mergeComponentRegistry, type KitComponent } from "./kit.js";
 import { sanitizeSvg } from "./sanitize.js";
 import { resolveNodeTemplates } from "./template.js";
 import { buildCanvas, buildNode } from "./tree.js";
@@ -30,9 +30,13 @@ export async function render(
   data: Record<string, unknown>,
   fonts: LoadedFont[],
   _options: RenderOptions = {}, // theme: reserved for v1 (auto/light/dark output variants)
+  components: readonly KitComponent[] = [], // per-request community definitions (§7.5), pre-validated
 ): Promise<RenderResult> {
   const warnings: string[] = [];
-  const registry = kitRegistry();
+  // Community definitions merge under the built-in kit for THIS request only —
+  // kit entries always win and the module-level registry is never mutated, so
+  // concurrent renders cannot see each other's components.
+  const registry = mergeComponentRegistry(kitRegistry(), components);
 
   // Step 2: resolve {{path}} bindings (missing paths warn, never fail), then
   // step 7 (§5.7): expand instances BEFORE the static/animated split, so

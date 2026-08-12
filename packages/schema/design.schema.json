@@ -131,8 +131,8 @@
         "type": { "const": "instance" },
         "component": {
           "type": "string",
-          "description": "Kit component id, e.g. \"kit/stat-card\".",
-          "pattern": "^[a-z0-9-]+/[a-z0-9-]+$"
+          "description": "Component reference: \"kit/stat-card\" (official kit, unversioned) or \"{owner}/{name}@{version}\" (community component pinned to an immutable published version).",
+          "pattern": "^[a-z0-9-]+/[a-z0-9-]+(@[0-9]+)?$"
         },
         "props": { "type": "object" }
       },
