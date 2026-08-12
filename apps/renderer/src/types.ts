@@ -4,7 +4,15 @@
  * strictly typed after ajv has validated the input.
  */
 
-export type AnimationPreset = "fadeIn" | "pulse" | "float";
+export type AnimationPreset =
+  | "fadeIn"
+  | "pulse"
+  | "float"
+  | "growX"
+  | "growY"
+  | "slideUp"
+  | "slideLeft"
+  | "blink";
 
 export interface Animation {
   preset: AnimationPreset;

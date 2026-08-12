@@ -1,0 +1,48 @@
+{
+  "id": "quote-banner",
+  "title": "Quote banner",
+  "description": "A quote with a large quotation mark and an accent bar that grows out.",
+  "frame": { "w": 720, "h": 90 },
+  "props": {
+    "quote": {
+      "type": "string",
+      "description": "The quote text.",
+      "default": "Simplicity is the soul of efficiency."
+    },
+    "accent": {
+      "type": "string",
+      "description": "Color of the quotation mark and the underline bar.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 720, "h": 90,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "mark",
+      "type": "text",
+      "x": 20, "y": 16, "w": 36, "h": 44,
+      "text": "“",
+      "style": { "fontSize": 40, "fontWeight": 700, "color": "{{props.accent}}" }
+    },
+    {
+      "id": "quote",
+      "type": "text",
+      "x": 64, "y": 28, "w": 620, "h": 24,
+      "text": "{{props.quote}}",
+      "style": { "fontSize": 16, "fontWeight": 500, "color": "#e6edf3", "letterSpacing": 0.2 },
+      "animation": { "preset": "fadeIn", "durationMs": 800 }
+    },
+    {
+      "id": "bar",
+      "type": "rect",
+      "x": 64, "y": 62, "w": 96, "h": 3,
+      "style": { "fill": "{{props.accent}}", "radius": 1.5 },
+      "animation": { "preset": "growX", "durationMs": 900, "delayMs": 200 }
+    }
+  ]
+}

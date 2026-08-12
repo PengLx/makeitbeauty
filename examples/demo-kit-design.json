@@ -1,12 +1,29 @@
 {
   "version": 0,
   "name": "Demo kit card",
-  "canvas": { "width": 800, "height": 400, "background": "#0d1117", "radius": 16 },
+  "canvas": { "width": 800, "height": 590, "background": "#0d1117", "radius": 16 },
   "nodes": [
+    {
+      "id": "hero",
+      "type": "instance",
+      "x": 40, "y": 40, "w": 720, "h": 120,
+      "component": "kit/profile-header",
+      "props": {
+        "name": "{{github.user.name}}",
+        "login": "{{github.user.login}}",
+        "followers": "{{github.user.followers}}"
+      }
+    },
+    {
+      "id": "divider",
+      "type": "instance",
+      "x": 40, "y": 172, "w": 720, "h": 24,
+      "component": "kit/accent-divider"
+    },
     {
       "id": "stars",
       "type": "instance",
-      "x": 40, "y": 40, "w": 260, "h": 140,
+      "x": 40, "y": 212, "w": 260, "h": 140,
       "component": "kit/stat-card",
       "props": {
         "label": "TOTAL STARS",
@@ -17,7 +34,7 @@
     {
       "id": "followers",
       "type": "instance",
-      "x": 340, "y": 40, "w": 260, "h": 140,
+      "x": 340, "y": 212, "w": 260, "h": 140,
       "component": "kit/stat-card",
       "props": {
         "label": "FOLLOWERS",
@@ -29,7 +46,7 @@
     {
       "id": "lang-bar",
       "type": "instance",
-      "x": 40, "y": 204, "w": 480, "h": 72,
+      "x": 40, "y": 368, "w": 480, "h": 72,
       "component": "kit/progress-bar",
       "props": {
         "label": "{{github.stats.topLanguage}}",
@@ -39,7 +56,7 @@
     {
       "id": "banner",
       "type": "instance",
-      "x": 40, "y": 296, "w": 540, "h": 90,
+      "x": 40, "y": 456, "w": 540, "h": 90,
       "component": "kit/text-banner",
       "props": {
         "title": "Hi, I'm {{github.user.name}}",

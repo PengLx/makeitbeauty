@@ -1,0 +1,97 @@
+{
+  "id": "stat-trio",
+  "title": "Stat trio",
+  "description": "Three side-by-side stat cells rising in with a 0/120/240ms stagger.",
+  "frame": { "w": 720, "h": 110 },
+  "props": {
+    "label1": { "type": "string", "description": "First cell label.", "default": "STARS" },
+    "value1": {
+      "type": "number",
+      "description": "First cell value. Bind it, e.g. {{github.stats.totalStars}}.",
+      "default": 5678
+    },
+    "label2": { "type": "string", "description": "Second cell label.", "default": "FOLLOWERS" },
+    "value2": {
+      "type": "number",
+      "description": "Second cell value. Bind it, e.g. {{github.user.followers}}.",
+      "default": 1234
+    },
+    "label3": { "type": "string", "description": "Third cell label.", "default": "CONTRIBUTIONS" },
+    "value3": {
+      "type": "number",
+      "description": "Third cell value. Bind it, e.g. {{github.stats.totalContributions}}.",
+      "default": 2847
+    }
+  },
+  "nodes": [
+    {
+      "id": "cell1-bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 226, "h": 110,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 },
+      "animation": { "preset": "slideUp", "durationMs": 600 }
+    },
+    {
+      "id": "cell1-label",
+      "type": "text",
+      "x": 20, "y": 20, "w": 186, "h": 16,
+      "text": "{{props.label1}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 },
+      "animation": { "preset": "slideUp", "durationMs": 600 }
+    },
+    {
+      "id": "cell1-value",
+      "type": "text",
+      "x": 20, "y": 46, "w": 186, "h": 40,
+      "text": "{{props.value1}}",
+      "style": { "fontSize": 30, "fontWeight": 700, "color": "#e6edf3" },
+      "animation": { "preset": "slideUp", "durationMs": 600 }
+    },
+    {
+      "id": "cell2-bg",
+      "type": "rect",
+      "x": 247, "y": 0, "w": 226, "h": 110,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 120 }
+    },
+    {
+      "id": "cell2-label",
+      "type": "text",
+      "x": 267, "y": 20, "w": 186, "h": 16,
+      "text": "{{props.label2}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 120 }
+    },
+    {
+      "id": "cell2-value",
+      "type": "text",
+      "x": 267, "y": 46, "w": 186, "h": 40,
+      "text": "{{props.value2}}",
+      "style": { "fontSize": 30, "fontWeight": 700, "color": "#e6edf3" },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 120 }
+    },
+    {
+      "id": "cell3-bg",
+      "type": "rect",
+      "x": 494, "y": 0, "w": 226, "h": 110,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 240 }
+    },
+    {
+      "id": "cell3-label",
+      "type": "text",
+      "x": 514, "y": 20, "w": 186, "h": 16,
+      "text": "{{props.label3}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 240 }
+    },
+    {
+      "id": "cell3-value",
+      "type": "text",
+      "x": 514, "y": 46, "w": 186, "h": 40,
+      "text": "{{props.value3}}",
+      "style": { "fontSize": 30, "fontWeight": 700, "color": "#e6edf3" },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 240 }
+    }
+  ]
+}

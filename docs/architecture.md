@@ -99,7 +99,10 @@ Secure cookies.
    nodes are rendered in **separate satori passes** (transparent background, same
    canvas), composed as `<g id="node-{id}">` layers over the static base pass, and
    a single injected `<style>` block carries preset `@keyframes` plus a
-   `prefers-reduced-motion` guard. Presets v0: `fadeIn`, `pulse`, `float`.
+   `prefers-reduced-motion` guard. Presets: `fadeIn`, `pulse`, `float`,
+   `growX`, `growY`, `slideUp`, `slideLeft`, `blink` — transform presets emit
+   `transform-box: fill-box` so scale/translate originate from the element's
+   own box, not the viewport.
 5. **Sanitize** (allowlist): reject `<script>`, `<foreignObject>`, `on*` attributes,
    `javascript:` hrefs, and **any external URL reference** (only `data:` URIs pass).
    External refs are not just broken-through-Camo — connector data + an

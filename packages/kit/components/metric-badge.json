@@ -1,0 +1,45 @@
+{
+  "id": "metric-badge",
+  "title": "Metric badge",
+  "description": "Compact label: value pill with an accent left border.",
+  "frame": { "w": 200, "h": 56 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Short metric name.",
+      "default": "Streak"
+    },
+    "value": {
+      "type": "string",
+      "description": "The metric value. Bind it, e.g. {{github.stats.totalStars}}.",
+      "default": "42 days"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Color of the left border.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 200, "h": 56,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#30363d", "strokeWidth": 1 }
+    },
+    {
+      "id": "edge",
+      "type": "rect",
+      "x": 0, "y": 12, "w": 4, "h": 32,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "x": 16, "y": 19, "w": 172, "h": 18,
+      "text": "{{props.label}}: {{props.value}}",
+      "style": { "fontSize": 14, "fontWeight": 600, "color": "#e6edf3" },
+      "animation": { "preset": "fadeIn", "durationMs": 700 }
+    }
+  ]
+}

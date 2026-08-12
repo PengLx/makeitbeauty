@@ -114,14 +114,53 @@ only), no scripts, animation via presets only. Components also never see
 connector credentials — they receive filtered data snapshots, nothing else
 (see [docs/SECURITY.md](../../docs/SECURITY.md)).
 
-## Components (v0 seed)
+## Animation presets
+
+Any node (or a whole instance) may carry an `animation`:
+
+```json
+"animation": { "preset": "growX", "durationMs": 900, "delayMs": 200, "loop": false }
+```
+
+| Preset | Effect | Typical use |
+|---|---|---|
+| `fadeIn` | opacity 0 → 1 | entrances for text and cards |
+| `pulse` | opacity 1 → 0.55 → 1 | drawing attention to a metric (use `loop: true`) |
+| `float` | translateY 0 → −6px → 0 | gentle hover for badges/orbs (use `loop: true`) |
+| `growX` | scaleX 0 → 1, origin left center | **progress fills, bars and rules growing out** |
+| `growY` | scaleY 0 → 1, origin center bottom | columns/charts growing up |
+| `slideUp` | translateY 8px + opacity 0 → rest | staggered text entrances (vary `delayMs`) |
+| `slideLeft` | translateX 8px + opacity 0 → rest | list items sliding into place |
+| `blink` | opacity 1 → 0 → 1 with a hard step-end cut | terminal cursors (use `loop: true`) |
+
+**Loop guidance.** `loop` defaults to `false` for EVERY preset — an animation
+plays once and holds its final frame. That is the right call for entrance
+presets (`fadeIn`, `growX`, `growY`, `slideUp`, `slideLeft`). For the cyclic
+presets — `blink`, `pulse` and `float` — a single play looks like a glitch, so
+set `loop: true` explicitly (see `accent-divider`'s cursor). Timing defaults:
+`durationMs` 800, `delayMs` 0. Stagger entrances by giving sibling nodes
+increasing `delayMs` (see `profile-header` and `stat-trio`).
+
+The transform presets (`growX`, `growY`, `slideUp`, `slideLeft`) are compiled
+with `transform-box: fill-box` plus a `transform-origin`, so the transform
+originates from the animated element's own bounding box — not the SVG
+view-box. All output is guarded by `prefers-reduced-motion`: users who opt out
+of motion get the final, static frame.
+
+## Components (v0)
 
 | Id | File | Frame | Purpose |
 |---|---|---|---|
 | `kit/stat-card` | [components/stat-card.json](components/stat-card.json) | 260×140 | One headline metric with label + caption |
 | `kit/text-banner` | [components/text-banner.json](components/text-banner.json) | 720×120 | Title + subtitle banner with accent tick |
-| `kit/progress-bar` | [components/progress-bar.json](components/progress-bar.json) | 480×72 | Labeled percentage bar (computed fill width) |
+| `kit/progress-bar` | [components/progress-bar.json](components/progress-bar.json) | 480×72 | Labeled percentage bar (computed fill width, fill grows out via `growX`) |
+| `kit/profile-header` | [components/profile-header.json](components/profile-header.json) | 720×120 | Name + @login + followers, staggered `slideUp` entrance |
+| `kit/metric-badge` | [components/metric-badge.json](components/metric-badge.json) | 200×56 | Compact `label: value` pill with accent left border, `fadeIn` |
+| `kit/stat-trio` | [components/stat-trio.json](components/stat-trio.json) | 720×110 | Three stat cells, each `slideUp` with 0/120/240ms stagger |
+| `kit/quote-banner` | [components/quote-banner.json](components/quote-banner.json) | 720×90 | Quote with accent quotation mark and a `growX` underline bar |
+| `kit/accent-divider` | [components/accent-divider.json](components/accent-divider.json) | 720×24 | Thin accent rule (`growX`) ending in a looping `blink` cursor square |
 
-All three use the GitHub-dark palette (`#0d1117` / `#161b22` / `#21262d` /
-`#58a6ff` / `#e6edf3` / `#7d8590`) with consistent radii (12 card / 4 bar)
-and 20px padding, so they compose cleanly on a `#0d1117` canvas.
+All components use the GitHub-dark palette (`#0d1117` / `#161b22` / `#21262d`
+/ `#30363d` / `#58a6ff` / `#e6edf3` / `#7d8590`) with consistent radii
+(12 card / 4 bar) and 16–20px padding, so they compose cleanly on a
+`#0d1117` canvas.

@@ -42,7 +42,18 @@
       "additionalProperties": false,
       "required": ["preset"],
       "properties": {
-        "preset": { "enum": ["fadeIn", "pulse", "float"] },
+        "preset": {
+          "enum": [
+            "fadeIn",
+            "pulse",
+            "float",
+            "growX",
+            "growY",
+            "slideUp",
+            "slideLeft",
+            "blink"
+          ]
+        },
         "delayMs": { "type": "integer", "minimum": 0, "maximum": 60000, "default": 0 },
         "durationMs": { "type": "integer", "minimum": 1, "maximum": 60000, "default": 800 },
         "loop": { "type": "boolean", "default": false }

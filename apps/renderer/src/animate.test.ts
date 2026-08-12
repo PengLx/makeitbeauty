@@ -57,6 +57,80 @@ describe("buildStyleBlock", () => {
   it("is empty when nothing animates", () => {
     expect(buildStyleBlock([])).toBe("");
   });
+
+  it("keeps the original trio byte-identical (determinism regression contract)", () => {
+    // Existing deployed designs must re-render to the exact same bytes.
+    // These strings are the pre-expansion output — do not reformat them.
+    expect(buildStyleBlock(["fadeIn", "pulse", "float"])).toBe(
+      "<style>@media (prefers-reduced-motion: no-preference){" +
+        ".mib-fadeIn{animation-name:mib-fadeIn}" +
+        ".mib-pulse{animation-name:mib-pulse}" +
+        ".mib-float{animation-name:mib-float}" +
+        "@keyframes mib-fadeIn{from{opacity:0}to{opacity:1}}" +
+        "@keyframes mib-pulse{0%,100%{opacity:1}50%{opacity:0.55}}" +
+        "@keyframes mib-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}" +
+        "}</style>",
+    );
+  });
+
+  it("emits growX keyframes with fill-box transform-box and left-center origin", () => {
+    const css = buildStyleBlock(["growX"]);
+    expect(css).toContain("@keyframes mib-growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}");
+    expect(css).toContain(
+      ".mib-growX{animation-name:mib-growX;transform-box:fill-box;transform-origin:left center}",
+    );
+  });
+
+  it("emits growY keyframes with fill-box transform-box and center-bottom origin", () => {
+    const css = buildStyleBlock(["growY"]);
+    expect(css).toContain("@keyframes mib-growY{from{transform:scaleY(0)}to{transform:scaleY(1)}}");
+    expect(css).toContain(
+      ".mib-growY{animation-name:mib-growY;transform-box:fill-box;transform-origin:center bottom}",
+    );
+  });
+
+  it("emits slideUp/slideLeft keyframes with fill-box transform-box", () => {
+    const up = buildStyleBlock(["slideUp"]);
+    expect(up).toContain(
+      "@keyframes mib-slideUp{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}",
+    );
+    expect(up).toContain(".mib-slideUp{animation-name:mib-slideUp;transform-box:fill-box}");
+
+    const left = buildStyleBlock(["slideLeft"]);
+    expect(left).toContain(
+      "@keyframes mib-slideLeft{from{transform:translateX(8px);opacity:0}to{transform:none;opacity:1}}",
+    );
+    expect(left).toContain(".mib-slideLeft{animation-name:mib-slideLeft;transform-box:fill-box}");
+  });
+
+  it("emits blink keyframes with per-keyframe step-end timing, no transform extras", () => {
+    const css = buildStyleBlock(["blink"]);
+    expect(css).toContain(
+      "@keyframes mib-blink{0%{opacity:1;animation-timing-function:step-end}" +
+        "50%{opacity:0;animation-timing-function:step-end}100%{opacity:1}}",
+    );
+    expect(css).toContain(".mib-blink{animation-name:mib-blink}");
+    expect(css).not.toContain(".mib-blink{animation-name:mib-blink;transform");
+  });
+
+  it("keeps opacity-only presets free of transform-box", () => {
+    expect(buildStyleBlock(["fadeIn", "pulse", "blink"])).not.toContain("transform-box");
+  });
+
+  it("orders new presets stably after the original trio", () => {
+    const css = buildStyleBlock(["blink", "growX", "slideUp", "fadeIn", "growY", "slideLeft"]);
+    const order = ["mib-fadeIn", "mib-growX", "mib-growY", "mib-slideUp", "mib-slideLeft", "mib-blink"];
+    const positions = order.map((name) => css.indexOf(`@keyframes ${name}{`));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it("emits only the new presets actually used", () => {
+    const css = buildStyleBlock(["growX"]);
+    for (const other of ["growY", "slideUp", "slideLeft", "blink", "fadeIn", "pulse", "float"]) {
+      expect(css).not.toContain(`mib-${other}`);
+    }
+  });
 });
 
 describe("animationStyle", () => {
@@ -110,5 +184,25 @@ describe("composeSvg", () => {
   it("emits no style block for a fully static design", () => {
     const svg = composeSvg(canvas, "<rect/>", []);
     expect(svg).not.toContain("<style>");
+  });
+
+  it("composes a design using every new preset deterministically", () => {
+    const layers = [
+      { node: rect("bar", { preset: "growX" as const, durationMs: 900 }), inner: "<rect/>" },
+      { node: rect("col", { preset: "growY" as const }), inner: "<rect/>" },
+      { node: rect("txt", { preset: "slideUp" as const, delayMs: 120 }), inner: "<rect/>" },
+      { node: rect("row", { preset: "slideLeft" as const }), inner: "<rect/>" },
+      { node: rect("cur", { preset: "blink" as const, loop: true }), inner: "<rect/>" },
+    ];
+    const a = composeSvg(canvas, "<rect/>", layers);
+    const b = composeSvg(canvas, "<rect/>", layers);
+    expect(a).toBe(b);
+    for (const p of ["growX", "growY", "slideUp", "slideLeft", "blink"]) {
+      expect(a).toContain(`@keyframes mib-${p}`);
+      expect(a).toContain(`class="mib-${p}"`);
+    }
+    expect(a).toContain("transform-box:fill-box");
+    expect(a).toContain('<g id="node-cur" class="mib-blink"');
+    expect(a).toContain("animation-iteration-count:infinite");
   });
 });

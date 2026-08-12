@@ -1,0 +1,60 @@
+{
+  "id": "profile-header",
+  "title": "Profile header",
+  "description": "Name, @login and follower count with a staggered slide-up entrance.",
+  "frame": { "w": 720, "h": 120 },
+  "props": {
+    "name": {
+      "type": "string",
+      "description": "Display name. Bind it, e.g. {{github.user.name}}.",
+      "default": "Ada Lovelace"
+    },
+    "login": {
+      "type": "string",
+      "description": "Handle, rendered as @login. Bind it, e.g. {{github.user.login}}.",
+      "default": "ada"
+    },
+    "followers": {
+      "type": "string",
+      "description": "Follower count. Bind it, e.g. {{github.user.followers}}.",
+      "default": "1,234"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Accent color for the followers line.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 720, "h": 120,
+      "style": { "fill": "#161b22", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "name",
+      "type": "text",
+      "x": 20, "y": 20, "w": 540, "h": 30,
+      "text": "{{props.name}}",
+      "style": { "fontSize": 24, "fontWeight": 700, "color": "#e6edf3" },
+      "animation": { "preset": "slideUp", "durationMs": 600 }
+    },
+    {
+      "id": "login",
+      "type": "text",
+      "x": 20, "y": 56, "w": 320, "h": 22,
+      "text": "@{{props.login}}",
+      "style": { "fontSize": 15, "fontWeight": 400, "color": "#7d8590" },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 120 }
+    },
+    {
+      "id": "followers",
+      "type": "text",
+      "x": 20, "y": 84, "w": 320, "h": 18,
+      "text": "{{props.followers}} followers",
+      "style": { "fontSize": 13, "fontWeight": 500, "color": "{{props.accent}}" },
+      "animation": { "preset": "slideUp", "durationMs": 600, "delayMs": 240 }
+    }
+  ]
+}

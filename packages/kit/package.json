@@ -6,6 +6,11 @@
   "files": [
     "components/stat-card.json",
     "components/text-banner.json",
-    "components/progress-bar.json"
+    "components/progress-bar.json",
+    "components/profile-header.json",
+    "components/metric-badge.json",
+    "components/stat-trio.json",
+    "components/quote-banner.json",
+    "components/accent-divider.json"
   ]
 }

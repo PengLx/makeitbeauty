@@ -208,11 +208,24 @@ describe("kit loading", () => {
   it("loads the official components keyed kit/{id}", () => {
     const loaded = kitRegistry();
     expect([...loaded.keys()].sort()).toEqual([
+      "kit/accent-divider",
+      "kit/metric-badge",
+      "kit/profile-header",
       "kit/progress-bar",
+      "kit/quote-banner",
       "kit/stat-card",
+      "kit/stat-trio",
       "kit/text-banner",
     ]);
     for (const component of loaded.values()) expect(component.nodes.length).toBeGreaterThan(0);
+  });
+
+  it("gives the progress-bar fill a growX entrance while the track stays static", () => {
+    const bar = kitRegistry().get("kit/progress-bar")!;
+    const fill = bar.nodes.find((n) => n.id === "fill")!;
+    const track = bar.nodes.find((n) => n.id === "track")!;
+    expect(fill.animation).toEqual({ preset: "growX", durationMs: 900 });
+    expect(track.animation).toBeUndefined();
   });
 
   it("rejects nested instance nodes at load time", () => {
@@ -256,7 +269,45 @@ describe("pipeline integration", () => {
     expect(a.warnings).toEqual([]);
     // The animated instance composes as ONE <g> layer with the preset class.
     expect(a.svg).toContain('<g id="node-banner" class="mib-fadeIn"');
-    expect(a.svg.match(/<g id="node-/g)).toHaveLength(1);
+    // Static instances compose their animated FRAGMENT nodes per-node:
+    // profile-header (3× slideUp) + accent-divider (growX line + blink cursor)
+    // + progress-bar fill (growX) + the fadeIn banner group = 7 layers.
+    expect(a.svg.match(/<g id="node-/g)).toHaveLength(7);
+    expect(a.svg).toContain('<g id="node-hero__name" class="mib-slideUp"');
+    expect(a.svg).toContain('<g id="node-lang-bar__fill" class="mib-growX"');
+    expect(a.svg).toContain('<g id="node-divider__cursor" class="mib-blink"');
+    // The growX fill grows out of its own box: keyframes + fill-box + origin.
+    expect(a.svg).toContain("@keyframes mib-growX");
+    expect(a.svg).toContain(
+      ".mib-growX{animation-name:mib-growX;transform-box:fill-box;transform-origin:left center}",
+    );
+    // Only the presets the demo actually uses are emitted.
+    expect(a.svg).not.toContain("@keyframes mib-pulse");
+    expect(a.svg).not.toContain("@keyframes mib-growY");
+    expect(a.svg).not.toContain("@keyframes mib-slideLeft");
+  }, 30000);
+
+  it("renders a design using every new preset deterministically", async () => {
+    const allNew: Design = {
+      version: 0,
+      canvas: { width: 300, height: 200, background: "#0d1117" },
+      nodes: [
+        { id: "bar", type: "rect", x: 10, y: 10, w: 200, h: 8, style: { fill: "#58a6ff" }, animation: { preset: "growX", durationMs: 900 } },
+        { id: "col", type: "rect", x: 10, y: 30, w: 20, h: 80, style: { fill: "#3fb950" }, animation: { preset: "growY" } },
+        { id: "up", type: "text", x: 40, y: 40, w: 200, h: 20, text: "up", style: { color: "#e6edf3" }, animation: { preset: "slideUp", delayMs: 120 } },
+        { id: "left", type: "text", x: 40, y: 70, w: 200, h: 20, text: "left", style: { color: "#e6edf3" }, animation: { preset: "slideLeft", delayMs: 240 } },
+        { id: "cursor", type: "rect", x: 10, y: 130, w: 10, h: 14, style: { fill: "#58a6ff" }, animation: { preset: "blink", loop: true } },
+      ],
+    };
+    const a = await render(allNew, {}, fonts);
+    const b = await render(allNew, {}, fonts);
+    expect(a.svg).toBe(b.svg);
+    expect(a.warnings).toEqual([]);
+    for (const p of ["growX", "growY", "slideUp", "slideLeft", "blink"]) {
+      expect(a.svg).toContain(`@keyframes mib-${p}`);
+    }
+    expect(a.svg).toContain("transform-origin:left center");
+    expect(a.svg).toContain("transform-origin:center bottom");
   }, 30000);
 
   it("renders an unknown component as a placeholder with a warning — never fails", async () => {

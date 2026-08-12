@@ -10,13 +10,55 @@
  */
 import type { Animation, AnimationPreset, Canvas, DesignNode } from "./types.js";
 
-/** Stable emission order for keyframes blocks. */
-const PRESET_ORDER: AnimationPreset[] = ["fadeIn", "pulse", "float"];
+/**
+ * Stable emission order for keyframes blocks. New presets are strictly
+ * APPENDED: the emitted CSS for a design using only the original trio must
+ * stay byte-identical (renders are deterministic; Actions diff outputs).
+ */
+const PRESET_ORDER: AnimationPreset[] = [
+  "fadeIn",
+  "pulse",
+  "float",
+  "growX",
+  "growY",
+  "slideUp",
+  "slideLeft",
+  "blink",
+];
 
 const KEYFRAMES: Record<AnimationPreset, string> = {
   fadeIn: "@keyframes mib-fadeIn{from{opacity:0}to{opacity:1}}",
   pulse: "@keyframes mib-pulse{0%,100%{opacity:1}50%{opacity:0.55}}",
   float: "@keyframes mib-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}",
+  growX: "@keyframes mib-growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}",
+  growY: "@keyframes mib-growY{from{transform:scaleY(0)}to{transform:scaleY(1)}}",
+  slideUp:
+    "@keyframes mib-slideUp{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}",
+  slideLeft:
+    "@keyframes mib-slideLeft{from{transform:translateX(8px);opacity:0}to{transform:none;opacity:1}}",
+  // step-end timing lives INSIDE the keyframes (per-keyframe timing function)
+  // so the hard on/off cut survives the ease-in-out set on the layer itself.
+  blink:
+    "@keyframes mib-blink{0%{opacity:1;animation-timing-function:step-end}" +
+    "50%{opacity:0;animation-timing-function:step-end}100%{opacity:1}}",
+};
+
+/**
+ * Per-preset declarations emitted alongside animation-name in the injected
+ * <style>. Transform presets need them because animated layers are SVG <g>
+ * elements: without `transform-box: fill-box`, transform-origin resolves
+ * against the whole view-box, so scaleX(0)→scaleX(1) would sweep from the
+ * canvas edge instead of growing out of the element's own box. fill-box +
+ * transform-origin pin the transform to the element's own bounding box
+ * (supported by Chrome/Firefox/Safari since 2017+, so safe for GitHub-rendered
+ * SVGs). The original trio (fadeIn/pulse/float) intentionally has NO extras —
+ * their emitted bytes must not change for existing designs.
+ */
+const PRESET_CLASS_EXTRAS: Partial<Record<AnimationPreset, string>> = {
+  growX: "transform-box:fill-box;transform-origin:left center", // bar grows out rightwards
+  growY: "transform-box:fill-box;transform-origin:center bottom", // column grows upwards
+  slideUp: "transform-box:fill-box", // translate is origin-independent; fill-box for consistency
+  slideLeft: "transform-box:fill-box",
 };
 
 export interface SplitNodes {
@@ -112,7 +154,12 @@ export function buildStyleBlock(presets: Iterable<AnimationPreset>): string {
   const usedSet = new Set(presets);
   const used = PRESET_ORDER.filter((p) => usedSet.has(p));
   if (used.length === 0) return "";
-  const classes = used.map((p) => `.mib-${p}{animation-name:mib-${p}}`).join("");
+  const classes = used
+    .map((p) => {
+      const extras = PRESET_CLASS_EXTRAS[p];
+      return `.mib-${p}{animation-name:mib-${p}${extras ? `;${extras}` : ""}}`;
+    })
+    .join("");
   const frames = used.map((p) => KEYFRAMES[p]).join("");
   return `<style>@media (prefers-reduced-motion: no-preference){${classes}${frames}}</style>`;
 }

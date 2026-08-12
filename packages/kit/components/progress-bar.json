@@ -50,7 +50,8 @@
       "id": "fill",
       "type": "rect",
       "x": 20, "y": 46, "w": 308, "h": 8,
-      "style": { "fill": "{{props.color}}", "radius": 4 }
+      "style": { "fill": "{{props.color}}", "radius": 4 },
+      "animation": { "preset": "growX", "durationMs": 900 }
     }
   ],
   "computed": [

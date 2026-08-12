@@ -1,0 +1,29 @@
+{
+  "id": "accent-divider",
+  "title": "Accent divider",
+  "description": "Thin accent rule that grows out, ending in a blinking terminal-cursor square.",
+  "frame": { "w": 720, "h": 24 },
+  "props": {
+    "color": {
+      "type": "string",
+      "description": "Color of the rule and the cursor.",
+      "default": "#58a6ff"
+    }
+  },
+  "nodes": [
+    {
+      "id": "line",
+      "type": "rect",
+      "x": 0, "y": 10, "w": 696, "h": 4,
+      "style": { "fill": "{{props.color}}", "radius": 2 },
+      "animation": { "preset": "growX", "durationMs": 900 }
+    },
+    {
+      "id": "cursor",
+      "type": "rect",
+      "x": 704, "y": 6, "w": 12, "h": 12,
+      "style": { "fill": "{{props.color}}", "radius": 2 },
+      "animation": { "preset": "blink", "durationMs": 1000, "delayMs": 900, "loop": true }
+    }
+  ]
+}
