@@ -66,7 +66,7 @@ for 5 minutes, so updates show up shortly after each run:
 ## Standalone usage
 
 ```yaml
-- uses: makeitbeauty/action@v0
+- uses: PengLx/makeitbeauty/packages/action@main
   with:
     project: my-profile-card
     deploy-token: ${{ secrets.MAKEITBEAUTY_DEPLOY_TOKEN }}

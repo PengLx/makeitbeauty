@@ -23,6 +23,9 @@ build:
 	cd apps/api && go build ./...
 
 test:
+	# renderer tests import @makeitbeauty/twc's built output — build it first
+	# so `make test` works on a fresh clone (and in CI, whatever the order)
+	pnpm --filter @makeitbeauty/twc build
 	pnpm -r test
 	cd apps/api && go test ./...
 

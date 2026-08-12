@@ -66,7 +66,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Render ${project.id}
-        uses: makeitbeauty/action@v0
+        uses: PengLx/makeitbeauty/packages/action@main
         with:
           api-url: ${apiUrl}
           project: ${project.id}

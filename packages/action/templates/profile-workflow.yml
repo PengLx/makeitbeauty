@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Render ${{ matrix.project }}
-        uses: makeitbeauty/action@v0
+        uses: PengLx/makeitbeauty/packages/action@main
         with:
           project: ${{ matrix.project }}
           deploy-token: ${{ secrets.MAKEITBEAUTY_DEPLOY_TOKEN }}

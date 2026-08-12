@@ -34,13 +34,19 @@ COPY apps/web/package.json apps/web/
 COPY packages/action/package.json packages/action/
 COPY packages/kit/package.json packages/kit/
 COPY packages/schema/package.json packages/schema/
+COPY packages/twc/package.json packages/twc/
+# --filter also pulls workspace dependencies (@makeitbeauty/twc) into the install
 RUN pnpm install --frozen-lockfile --filter @makeitbeauty/renderer
 
+# twc (workspace dep) must be built before the renderer's tsc can resolve it
+COPY packages/twc/tsconfig.json packages/twc/
+COPY packages/twc/src/ packages/twc/src/
 COPY apps/renderer/tsconfig.json apps/renderer/
 COPY apps/renderer/src/ apps/renderer/src/
-RUN pnpm --filter @makeitbeauty/renderer build \
+RUN pnpm --filter @makeitbeauty/twc build \
+ && pnpm --filter @makeitbeauty/renderer build \
  # replace the dev install with production-only node_modules for the runtime stage
- && rm -rf node_modules apps/renderer/node_modules \
+ && rm -rf node_modules apps/renderer/node_modules packages/twc/node_modules \
  && pnpm install --prod --frozen-lockfile --filter @makeitbeauty/renderer
 
 # ---- runtime --------------------------------------------------------------
@@ -56,6 +62,9 @@ COPY --from=build --chown=node:node /app/node_modules/ node_modules/
 COPY --from=build --chown=node:node /app/apps/renderer/node_modules/ apps/renderer/node_modules/
 COPY --from=build --chown=node:node /app/apps/renderer/package.json apps/renderer/
 COPY --from=build --chown=node:node /app/apps/renderer/dist/ apps/renderer/dist/
+# workspace dep target of the @makeitbeauty/twc symlink in apps/renderer/node_modules
+COPY --from=build --chown=node:node /app/packages/twc/package.json packages/twc/
+COPY --from=build --chown=node:node /app/packages/twc/dist/ packages/twc/dist/
 COPY --from=fonts --chown=node:node /fonts/ apps/renderer/fonts/
 # shared runtime assets, straight from the build context
 COPY --chown=node:node packages/schema/ packages/schema/
