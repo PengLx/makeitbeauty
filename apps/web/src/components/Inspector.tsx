@@ -9,6 +9,7 @@ import {
   type InstanceNode,
   type RectNode,
   type TextNode,
+  ANIMATION_PRESETS,
 } from "@/lib/design";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
 import type { ConnectorInfo } from "@/lib/api";
@@ -33,11 +34,17 @@ interface Props {
   kit: KitComponent | undefined;
   /** Connector list from the one shared /v1/connectors load; [] when unavailable. */
   connectors: ConnectorInfo[];
+  /**
+   * Component Studio mode: `connectors` is the synthetic "props" source
+   * (§7.5 — components may only reference {{props.*}}, never connector
+   * data), so the binding surfaces re-label from data language to props.
+   */
+  propsOnly?: boolean;
   onPatch: (id: string, patch: Partial<DesignNode>) => void;
 }
 
 /** Right-column property editor for the selected node. */
-export function Inspector({ node, kit, connectors, onPatch }: Props) {
+export function Inspector({ node, kit, connectors, propsOnly, onPatch }: Props) {
   if (!node) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -82,7 +89,13 @@ export function Inspector({ node, kit, connectors, onPatch }: Props) {
       </Section>
 
       <Separator />
-      <TypeSection node={node} kit={kit} connectors={connectors} patch={patch} />
+      <TypeSection
+        node={node}
+        kit={kit}
+        connectors={connectors}
+        propsOnly={propsOnly}
+        patch={patch}
+      />
       <Separator />
       <AnimationSection node={node} patch={patch} />
     </div>
@@ -93,16 +106,25 @@ function TypeSection({
   node,
   kit,
   connectors,
+  propsOnly,
   patch,
 }: {
   node: DesignNode;
   kit: KitComponent | undefined;
   connectors: ConnectorInfo[];
+  propsOnly?: boolean;
   patch: (p: Partial<DesignNode>) => void;
 }) {
   switch (node.type) {
     case "text":
-      return <TextSection node={node} connectors={connectors} patch={patch} />;
+      return (
+        <TextSection
+          node={node}
+          connectors={connectors}
+          propsOnly={propsOnly}
+          patch={patch}
+        />
+      );
     case "rect":
       return <RectSection node={node} patch={patch} />;
     case "image":
@@ -133,10 +155,12 @@ function TypeSection({
 function TextSection({
   node,
   connectors,
+  propsOnly,
   patch,
 }: {
   node: TextNode;
   connectors: ConnectorInfo[];
+  propsOnly?: boolean;
   patch: (p: Partial<DesignNode>) => void;
 }) {
   const s = node.style ?? {};
@@ -150,12 +174,16 @@ function TextSection({
           rows={3}
           spellCheck={false}
           className="font-mono text-xs"
-          placeholder="Text — {{path.to.field}} binds data"
+          placeholder={
+            propsOnly
+              ? "Text — {{props.name}} fills a prop slot"
+              : "Text — {{path.to.field}} binds data"
+          }
           onChange={(e) => patch({ text: e.target.value })}
         />
       </Field>
       {connectors.some((c) => (c.fields ?? []).length > 0) && (
-        <Field label="Insert field">
+        <Field label={propsOnly ? "Insert prop" : "Insert field"}>
           {/* value stays "" so the trigger always shows the placeholder;
               selecting appends the {{connector.path}} template to the content
               (v0: end-of-text, not cursor position). Text is compositional —
@@ -163,7 +191,7 @@ function TextSection({
           <FieldSelect
             connectors={connectors}
             value=""
-            placeholder="Bind connector data…"
+            placeholder={propsOnly ? "Insert {{props.*}}…" : "Bind connector data…"}
             onPick={(path) => patch({ text: `${node.text}{{${path}}}` })}
           />
         </Field>
@@ -363,9 +391,14 @@ function AnimationSection({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="none">none</SelectItem>
-            <SelectItem value="fadeIn">fadeIn</SelectItem>
-            <SelectItem value="pulse">pulse</SelectItem>
-            <SelectItem value="float">float</SelectItem>
+            {ANIMATION_PRESETS.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                <span className="font-mono">{p.value}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {p.hint}
+                </span>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </Field>

@@ -11,6 +11,13 @@ import { SessionControls } from "./SessionControls";
 import { usePreview } from "../hooks/usePreview";
 import { useKit, type KitComponent } from "../hooks/useKit";
 import { useConnectors } from "../hooks/useConnectors";
+import { useMyComponents } from "../hooks/useMyComponents";
+import { useComponentDefs } from "../hooks/useComponentDefs";
+import {
+  isUserComponentRef,
+  splitComponentId,
+  type ComponentDefinition,
+} from "@/lib/component";
 import {
   ApiError,
   getProject,
@@ -75,6 +82,44 @@ export function Editor({ me, projectId, onBack }: Props) {
     () => new Map(kit.components.map((c) => [c.id, c])),
     [kit.components],
   );
+  // My published components for the palette (silently degrades signed-out).
+  const myComponents = useMyComponents();
+  // Every pinned user-component ref this design mentions, hydrated from the
+  // module-level version cache so the inspector can render typed prop inputs
+  // and the canvas can label instances — exactly like kit components.
+  const userRefs = useMemo(
+    () =>
+      design
+        ? [
+            ...new Set(
+              design.nodes
+                .filter(
+                  (n): n is Extract<DesignNode, { type: "instance" }> =>
+                    n.type === "instance" && isUserComponentRef(n.component),
+                )
+                .map((n) => n.component),
+            ),
+          ]
+        : [],
+    [design],
+  );
+  const userDefs = useComponentDefs(userRefs);
+  // One lookup for every instance surface: kit entries + resolved user
+  // definitions narrowed to the KitComponent metadata shape (id here is the
+  // pinned ref, matching node.component verbatim).
+  const componentsById = useMemo(() => {
+    const merged = new Map<string, KitComponent>(kitById);
+    for (const [ref, def] of userDefs) {
+      merged.set(ref, {
+        id: ref,
+        title: def.title,
+        description: def.description,
+        frame: def.frame,
+        props: def.props,
+      });
+    }
+    return merged;
+  }, [kitById, userDefs]);
   // One /v1/connectors load shared by every binding surface (instance-prop
   // BindingControls + the text insert picker); [] when unavailable (401, API
   // down) — Data mode disables with a sign-in hint.
@@ -264,6 +309,30 @@ export function Editor({ me, projectId, onBack }: Props) {
     });
   }
 
+  /**
+   * Insert a user component pinned to `ref` — the latest published version AT
+   * INSERT TIME ("{owner}/{name}@{n}"); the design keeps that exact version
+   * until its author opts into a newer one (§7.5: no silent auto-updates).
+   * Frame-sized, centered, selected — identical feel to kit inserts.
+   */
+  function insertUserInstance(ref: string, def: ComponentDefinition) {
+    if (!design) return;
+    const { w, h } = def.frame;
+    const prefix = splitComponentId(ref)?.name ?? "instance";
+    const defaults = Object.fromEntries(
+      Object.entries(def.props).map(([key, p]) => [key, p.default]),
+    );
+    insertNode({
+      id: nextNodeId(design, prefix),
+      type: "instance",
+      ...centeredPosition(design.canvas, w, h),
+      w,
+      h,
+      component: ref,
+      props: defaults,
+    });
+  }
+
   const selectedNode = design ? findNode(design, selectedNodeId) : null;
   const ready = project != null && design != null;
 
@@ -374,7 +443,9 @@ export function Editor({ me, projectId, onBack }: Props) {
         <div className="flex min-h-0 flex-1">
           <Palette
             kit={kit}
+            my={myComponents}
             onInsertComponent={insertComponent}
+            onInsertUserInstance={insertUserInstance}
             onInsertText={insertText}
             onInsertRect={insertRect}
           />
@@ -394,7 +465,7 @@ export function Editor({ me, projectId, onBack }: Props) {
               <DesignCanvas
                 design={design}
                 selectedId={selectedNodeId}
-                kitById={kitById}
+                kitById={componentsById}
                 onSelect={setSelectedNodeId}
                 onPatchNode={patchNode}
                 onDeleteNode={deleteNode}
@@ -427,7 +498,7 @@ export function Editor({ me, projectId, onBack }: Props) {
               node={selectedNode}
               kit={
                 selectedNode?.type === "instance"
-                  ? kitById.get(selectedNode.component)
+                  ? componentsById.get(selectedNode.component)
                   : undefined
               }
               connectors={connectors ?? []}

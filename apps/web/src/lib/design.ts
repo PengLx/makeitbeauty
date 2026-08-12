@@ -6,7 +6,29 @@
  * convenience, not a security boundary.
  */
 
-export type AnimationPreset = "fadeIn" | "pulse" | "float";
+// Keep in sync with packages/schema/design.schema.json $defs.animation.preset
+// and the renderer's preset registry (apps/renderer/src/animate.ts).
+export type AnimationPreset =
+  | "fadeIn"
+  | "pulse"
+  | "float"
+  | "growX"
+  | "growY"
+  | "slideUp"
+  | "slideLeft"
+  | "blink";
+
+/** Preset list for the Inspector dropdown, with a short effect hint. */
+export const ANIMATION_PRESETS: { value: AnimationPreset; hint: string }[] = [
+  { value: "fadeIn", hint: "fade in" },
+  { value: "pulse", hint: "opacity pulse (loop it)" },
+  { value: "float", hint: "gentle vertical float (loop it)" },
+  { value: "growX", hint: "grow from the left" },
+  { value: "growY", hint: "grow from the bottom" },
+  { value: "slideUp", hint: "slide up + fade in" },
+  { value: "slideLeft", hint: "slide left + fade in" },
+  { value: "blink", hint: "terminal-cursor blink (loop it)" },
+];
 
 export interface DesignAnimation {
   preset: AnimationPreset;

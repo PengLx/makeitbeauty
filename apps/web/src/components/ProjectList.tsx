@@ -34,10 +34,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SectionNav, type Section } from "./SectionNav";
 import { SessionControls } from "./SessionControls";
 
 interface Props {
   me: Me;
+  onNavigate: (section: Section) => void;
   onOpen: (projectId: string) => void;
 }
 
@@ -45,7 +47,7 @@ interface Props {
  * Home view: card grid over GET /v1/projects with create (dialog → POST) and
  * delete (confirm → DELETE). Clicking a card opens it in the editor.
  */
-export function ProjectList({ me, onOpen }: Props) {
+export function ProjectList({ me, onNavigate, onOpen }: Props) {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [listError, setListError] = useState<ApiError | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -122,9 +124,7 @@ export function ProjectList({ me, onOpen }: Props) {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center gap-3 border-b bg-card px-4 py-2">
         <span className="text-sm font-semibold">MakeItBeauty</span>
-        <span className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-          projects
-        </span>
+        <SectionNav active="projects" onNavigate={onNavigate} />
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={openCreate}>
             <Plus data-icon="inline-start" />

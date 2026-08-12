@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
+import { Puzzle } from "lucide-react";
 import {
   MIN_NODE_SIZE,
   findNode,
@@ -29,6 +30,12 @@ interface Props {
   selectedId: string | null;
   /** Kit metadata by component id ("kit/stat-card") for instance labels. */
   kitById: Map<string, KitComponent>;
+  /**
+   * Component Studio: marks the canvas as a component FRAME (a Figma-style
+   * corner tag + dashed outline) — nodes here are fragment nodes positioned
+   * relative to the frame's top-left, not a full design canvas.
+   */
+  frameLabel?: string;
   onSelect: (id: string | null) => void;
   onPatchNode: (id: string, patch: Partial<DesignNode>) => void;
   onDeleteNode: (id: string) => void;
@@ -85,6 +92,7 @@ export function DesignCanvas({
   design,
   selectedId,
   kitById,
+  frameLabel,
   onSelect,
   onPatchNode,
   onDeleteNode,
@@ -180,6 +188,18 @@ export function DesignCanvas({
           borderRadius: design.canvas.radius ?? 0,
         }}
       >
+        {frameLabel && (
+          <>
+            <span className="pointer-events-none absolute -top-5 left-0 flex items-center gap-1 font-mono text-[10px] text-sky-400/90">
+              <Puzzle className="size-3" aria-hidden />
+              {frameLabel}
+            </span>
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 rounded-[inherit] border border-dashed border-sky-500/30"
+            />
+          </>
+        )}
         {design.nodes.map((node) => (
           <CanvasNode
             key={node.id}

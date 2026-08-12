@@ -1,4 +1,4 @@
-import { Plug } from "lucide-react";
+import { Braces, Plug } from "lucide-react";
 
 /** GitHub mark — lucide dropped brand icons, so it's inlined (sized like one). */
 export function GitHubMark(props: React.SVGProps<SVGSVGElement>) {
@@ -25,6 +25,10 @@ export function ConnectorIcon({
   switch (connector) {
     case "github":
       return <GitHubMark className={className} />;
+    // The Component Studio's synthetic "props" source (its pickers list the
+    // component's declared props instead of connector fields — §7.5).
+    case "props":
+      return <Braces className={className} aria-hidden="true" />;
     default:
       return <Plug className={className} aria-hidden="true" />;
   }

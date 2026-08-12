@@ -9,6 +9,7 @@
  */
 
 import type { DesignDoc } from "./design";
+import { isComponentDefinition, type ComponentDefinition } from "./component";
 
 export interface Binding {
   connector: string;
@@ -221,6 +222,207 @@ export function updateProject(id: string, patch: ProjectPatch): Promise<Project>
 
 export function deleteProject(id: string): Promise<void> {
   return send("DELETE", `/v1/projects/${encodeURIComponent(id)}`);
+}
+
+// ---- community components (architecture §7.5 + §8) ----------------------
+
+/**
+ * Registry metadata for one user component (§7.5 data model). latestVersion 0
+ * means never published — a private draft. Server routes may attach the draft
+ * and/or latest published definition; toComponentRecord normalizes either
+ * spelling so views never re-parse response shapes.
+ */
+export interface ComponentRecord {
+  /** "{owner}/{name}" — namespace is the owner's GitHub login, lowercased. */
+  id: string;
+  title: string;
+  description?: string;
+  latestVersion: number;
+  unlisted?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  /** Frame size when the route carries it at the metadata level. */
+  frame?: { w: number; h: number };
+  /** The mutable draft definition (owner-only routes). */
+  draft?: ComponentDefinition | null;
+  /** The latest published definition (public once published). */
+  definition?: ComponentDefinition | null;
+}
+
+/** One community browse hit (GET /v1/community/components). */
+export interface CommunityComponent {
+  id: string;
+  owner: string;
+  title: string;
+  description?: string;
+  latestVersion: number;
+  updatedAt?: string;
+}
+
+/**
+ * Defensive normalization of component-record responses. The §8 contract
+ * fixes routes and the §7.5 data model, but not the response envelope; this
+ * accepts the record bare or under {component}, with the version count as
+ * latestVersion|version and definitions as draft|definition.
+ */
+function toComponentRecord(body: unknown): ComponentRecord {
+  const root = (body ?? {}) as Record<string, unknown>;
+  const raw = (
+    typeof root.component === "object" && root.component !== null
+      ? root.component
+      : root
+  ) as Record<string, unknown>;
+  const draft = isComponentDefinition(raw.draft) ? raw.draft : null;
+  const definition = isComponentDefinition(raw.definition) ? raw.definition : null;
+  const frame = raw.frame as { w?: unknown; h?: unknown } | undefined;
+  return {
+    frame:
+      typeof frame?.w === "number" && typeof frame?.h === "number"
+        ? { w: frame.w, h: frame.h }
+        : undefined,
+    id: String(raw.id ?? ""),
+    title: String(raw.title ?? raw.id ?? ""),
+    description: typeof raw.description === "string" ? raw.description : undefined,
+    latestVersion:
+      typeof raw.latestVersion === "number"
+        ? raw.latestVersion
+        : typeof raw.version === "number"
+          ? raw.version
+          : 0,
+    unlisted: raw.unlisted === true,
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+    draft,
+    definition,
+  };
+}
+
+function componentPath(owner: string, name: string, suffix = ""): string {
+  return `/v1/components/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${suffix}`;
+}
+
+/** GET /v1/components — my components: drafts + published (session). */
+export async function listMyComponents(
+  signal?: AbortSignal,
+): Promise<ComponentRecord[]> {
+  const body = await request<{ components?: unknown[] } | unknown[]>(
+    "/v1/components",
+    { signal },
+  );
+  const items = Array.isArray(body) ? body : (body.components ?? []);
+  return items.map(toComponentRecord);
+}
+
+/** POST /v1/components → a fresh draft; id = "{login}/{name}". */
+export async function createComponent(req: {
+  name: string;
+  title: string;
+  frame: { w: number; h: number };
+}): Promise<ComponentRecord> {
+  return toComponentRecord(await send("POST", "/v1/components", req));
+}
+
+/** GET /v1/components/{owner}/{name} — metadata + definitions. */
+export async function getComponent(
+  owner: string,
+  name: string,
+  signal?: AbortSignal,
+): Promise<ComponentRecord> {
+  return toComponentRecord(
+    await request(componentPath(owner, name), { signal }),
+  );
+}
+
+/**
+ * PUT /v1/components/{owner}/{name} — replace the mutable draft (owner only).
+ * The body is the definition's own fields, flattened
+ * ({id?, title, description?, frame, props?, nodes?, computed?}) — the API
+ * strict-decodes and rejects unknown fields, so no {definition} wrapper.
+ */
+export async function updateComponent(
+  owner: string,
+  name: string,
+  definition: ComponentDefinition,
+): Promise<ComponentRecord> {
+  return toComponentRecord(
+    await send("PUT", componentPath(owner, name), {
+      id: definition.id,
+      title: definition.title,
+      // undefined serializes away; "" is a valid "no description".
+      description: definition.description,
+      frame: definition.frame,
+      props: definition.props,
+      nodes: definition.nodes,
+      computed: definition.computed,
+    }),
+  );
+}
+
+/**
+ * POST /v1/components/{owner}/{name}/publish — freezes the next immutable
+ * version after renderer validation; validation failures surface verbatim as
+ * ApiError. Resolves the published version number; if the response shape
+ * doesn't carry one, re-reads the record (self-healing against envelope
+ * drift).
+ */
+export async function publishComponent(
+  owner: string,
+  name: string,
+): Promise<number> {
+  const body = await send<unknown>("POST", componentPath(owner, name, "/publish"));
+  const record = toComponentRecord(body);
+  if (record.latestVersion > 0) return record.latestVersion;
+  return (await getComponent(owner, name)).latestVersion;
+}
+
+/** GET /v1/community/components?q= — published components, newest first (public). */
+export async function listCommunity(
+  q: string,
+  signal?: AbortSignal,
+): Promise<CommunityComponent[]> {
+  const query = q.trim() === "" ? "" : `?q=${encodeURIComponent(q.trim())}`;
+  const body = await request<{ components?: unknown[] } | unknown[]>(
+    `/v1/community/components${query}`,
+    { signal },
+  );
+  const items = Array.isArray(body) ? body : (body.components ?? []);
+  return items.map((item) => {
+    const record = toComponentRecord(item);
+    const raw = (item ?? {}) as Record<string, unknown>;
+    return {
+      id: record.id,
+      owner:
+        typeof raw.owner === "string" ? raw.owner : record.id.split("/")[0] ?? "",
+      title: record.title,
+      description: record.description,
+      latestVersion: record.latestVersion,
+      updatedAt: record.updatedAt,
+    };
+  });
+}
+
+/**
+ * GET /v1/components/{owner}/{name}/versions/{n} — one immutable published
+ * definition (public). Accepts the definition bare or under {definition}.
+ */
+export async function getComponentVersion(
+  owner: string,
+  name: string,
+  version: number,
+  signal?: AbortSignal,
+): Promise<ComponentDefinition> {
+  const body = await request<unknown>(
+    componentPath(owner, name, `/versions/${version}`),
+    { signal },
+  );
+  if (isComponentDefinition(body)) return body;
+  const wrapped = (body as { definition?: unknown } | null)?.definition;
+  if (isComponentDefinition(wrapped)) return wrapped;
+  throw new ApiError(
+    "invalid_response",
+    `GET ${componentPath(owner, name, `/versions/${version}`)} returned no component definition`,
+    200,
+  );
 }
 
 // ---- deploy tokens (architecture §8) ------------------------------------
