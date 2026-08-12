@@ -216,8 +216,11 @@ with KMS-managed keys (see SECURITY.md).
   `MIB_GITHUB_CLIENT_ID`, the implicit dev user remains (`/v1/me` flags
   `dev: true`); production without auth config refuses to boot.
 - `GET /v1/connectors` — session auth: the user's connector status plus available
-  snapshot field paths (drives the editor's insert-binding picker):
-  `[{connector: "github", status: "connected"|"unconfigured"|"expired", fields: [{path, description}]}]`.
+  snapshot field paths (drives the editor's binding controls):
+  `[{connector: "github", status: "connected"|"unconfigured"|"expired",
+  fields: [{path, description, type: "string"|"number"}]}]`. Every bindable
+  editor input offers Custom vs. Data modes; Data mode lists only fields whose
+  type matches the input.
 - Auth/crypto env: `MIB_PUBLIC_URL`, `MIB_MASTER_KEY` (base64 32-byte key;
   credential sealing), `MIB_GITHUB_CLIENT_ID`, `MIB_GITHUB_CLIENT_SECRET`,
   `MIB_GITHUB_APP_SLUG` (install link; reserved), `MIB_GITHUB_URL` /

@@ -75,9 +75,10 @@ export function Editor({ me, projectId, onBack }: Props) {
     () => new Map(kit.components.map((c) => [c.id, c])),
     [kit.components],
   );
-  // Bindable connector fields for the inspector's insert-field picker; empty
-  // (picker hidden) when /v1/connectors is unavailable.
-  const { fields: bindingFields } = useConnectors();
+  // One /v1/connectors load shared by every binding surface (instance-prop
+  // BindingControls + the text insert picker); [] when unavailable (401, API
+  // down) — Data mode disables with a sign-in hint.
+  const { connectors } = useConnectors();
 
   // Lives at the Editor level so the preview survives tab switches. Sends the
   // CURRENT project design; null (still loading) skips rendering.
@@ -429,7 +430,7 @@ export function Editor({ me, projectId, onBack }: Props) {
                   ? kitById.get(selectedNode.component)
                   : undefined
               }
-              bindingFields={bindingFields}
+              connectors={connectors ?? []}
               onPatch={patchNode}
             />
             <PreviewPane preview={preview} />

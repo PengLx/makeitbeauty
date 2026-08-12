@@ -3,11 +3,13 @@
     "user": {
       "name": "Ada Lovelace",
       "login": "ada",
+      "avatarUrl": "https://avatars.githubusercontent.com/u/9919?v=4",
       "followers": 1234
     },
     "stats": {
       "totalStars": 5678,
-      "topLanguage": "TypeScript"
+      "topLanguage": "TypeScript",
+      "totalContributions": 2847
     }
   }
 }

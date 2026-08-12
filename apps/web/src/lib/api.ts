@@ -145,10 +145,16 @@ export interface Me {
 
 export type ConnectorStatus = "connected" | "unconfigured" | "expired";
 
-/** One bindable snapshot field, e.g. {path: "github.followers", …}. */
+/**
+ * One bindable snapshot field, e.g. {path: "user.followers", …}. Paths are
+ * relative to the connector; qualify with the connector name to build a
+ * template (see qualifyPath in BindingControl). `type` drives the editor's
+ * binding controls: a number input only offers number fields (§8).
+ */
 export interface ConnectorField {
   path: string;
   description?: string;
+  type: "string" | "number";
 }
 
 export interface ConnectorInfo {

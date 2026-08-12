@@ -21,19 +21,23 @@ import (
 type Field struct {
 	Path        string `json:"path"`
 	Description string `json:"description"`
+	// Type is the value type at this path: "string" or "number". The editor's
+	// binding controls filter by it — a numeric prop (e.g. a progress bar's
+	// percent) only offers number fields.
+	Type string `json:"type"`
 }
 
 // GitHubFields is the single source of truth for the github snapshot shape:
 // the paths Fetch produces and the picker the editor renders. Keep it in sync
 // with buildSnapshot below.
 var GitHubFields = []Field{
-	{Path: "user.name", Description: "Display name"},
-	{Path: "user.login", Description: "GitHub username"},
-	{Path: "user.avatarUrl", Description: "Avatar image URL"},
-	{Path: "user.followers", Description: "Follower count"},
-	{Path: "stats.totalStars", Description: "Stars across owned repositories"},
-	{Path: "stats.topLanguage", Description: "Top language, star-weighted"},
-	{Path: "stats.totalContributions", Description: "Contributions in the last year"},
+	{Path: "user.name", Description: "Display name", Type: "string"},
+	{Path: "user.login", Description: "GitHub username", Type: "string"},
+	{Path: "user.avatarUrl", Description: "Avatar image URL", Type: "string"},
+	{Path: "user.followers", Description: "Follower count", Type: "number"},
+	{Path: "stats.totalStars", Description: "Stars across owned repositories", Type: "number"},
+	{Path: "stats.topLanguage", Description: "Top language, star-weighted", Type: "string"},
+	{Path: "stats.totalContributions", Description: "Contributions in the last year", Type: "number"},
 }
 
 // githubQuery fetches everything one snapshot needs in a single GraphQL round

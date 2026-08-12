@@ -11,7 +11,8 @@ import {
   type TextNode,
 } from "@/lib/design";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
-import type { ConnectorField } from "@/lib/api";
+import type { ConnectorInfo } from "@/lib/api";
+import { BindingControl, FieldSelect, type BindingKind } from "@/components/BindingControl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,13 +31,13 @@ interface Props {
   node: DesignNode | null;
   /** Kit metadata for the selected instance node's component, if loaded. */
   kit: KitComponent | undefined;
-  /** Bindable connector fields; empty hides the text insert-field picker. */
-  bindingFields: ConnectorField[];
+  /** Connector list from the one shared /v1/connectors load; [] when unavailable. */
+  connectors: ConnectorInfo[];
   onPatch: (id: string, patch: Partial<DesignNode>) => void;
 }
 
 /** Right-column property editor for the selected node. */
-export function Inspector({ node, kit, bindingFields, onPatch }: Props) {
+export function Inspector({ node, kit, connectors, onPatch }: Props) {
   if (!node) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -81,7 +82,7 @@ export function Inspector({ node, kit, bindingFields, onPatch }: Props) {
       </Section>
 
       <Separator />
-      <TypeSection node={node} kit={kit} bindingFields={bindingFields} patch={patch} />
+      <TypeSection node={node} kit={kit} connectors={connectors} patch={patch} />
       <Separator />
       <AnimationSection node={node} patch={patch} />
     </div>
@@ -91,17 +92,17 @@ export function Inspector({ node, kit, bindingFields, onPatch }: Props) {
 function TypeSection({
   node,
   kit,
-  bindingFields,
+  connectors,
   patch,
 }: {
   node: DesignNode;
   kit: KitComponent | undefined;
-  bindingFields: ConnectorField[];
+  connectors: ConnectorInfo[];
   patch: (p: Partial<DesignNode>) => void;
 }) {
   switch (node.type) {
     case "text":
-      return <TextSection node={node} bindingFields={bindingFields} patch={patch} />;
+      return <TextSection node={node} connectors={connectors} patch={patch} />;
     case "rect":
       return <RectSection node={node} patch={patch} />;
     case "image":
@@ -125,17 +126,17 @@ function TypeSection({
         </Section>
       );
     case "instance":
-      return <InstanceSection node={node} kit={kit} patch={patch} />;
+      return <InstanceSection node={node} kit={kit} connectors={connectors} patch={patch} />;
   }
 }
 
 function TextSection({
   node,
-  bindingFields,
+  connectors,
   patch,
 }: {
   node: TextNode;
-  bindingFields: ConnectorField[];
+  connectors: ConnectorInfo[];
   patch: (p: Partial<DesignNode>) => void;
 }) {
   const s = node.style ?? {};
@@ -153,26 +154,18 @@ function TextSection({
           onChange={(e) => patch({ text: e.target.value })}
         />
       </Field>
-      {bindingFields.length > 0 && (
+      {connectors.some((c) => (c.fields ?? []).length > 0) && (
         <Field label="Insert field">
           {/* value stays "" so the trigger always shows the placeholder;
-              selecting appends the {{path}} template to the content (v0:
-              end-of-text, not cursor position). */}
-          <Select
+              selecting appends the {{connector.path}} template to the content
+              (v0: end-of-text, not cursor position). Text is compositional —
+              string AND number fields both insert; numbers stringify. */}
+          <FieldSelect
+            connectors={connectors}
             value=""
-            onValueChange={(path) => patch({ text: `${node.text}{{${path}}}` })}
-          >
-            <SelectTrigger size="sm" className="w-full">
-              <SelectValue placeholder="Bind connector data…" />
-            </SelectTrigger>
-            <SelectContent>
-              {bindingFields.map((f) => (
-                <SelectItem key={f.path} value={f.path} title={f.description}>
-                  <span className="font-mono text-xs">{f.path}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder="Bind connector data…"
+            onPick={(path) => patch({ text: `${node.text}{{${path}}}` })}
+          />
         </Field>
       )}
       <div className="grid grid-cols-2 gap-2">
@@ -261,10 +254,12 @@ function RectSection({ node, patch }: { node: RectNode; patch: (p: Partial<Desig
 function InstanceSection({
   node,
   kit,
+  connectors,
   patch,
 }: {
   node: InstanceNode;
   kit: KitComponent | undefined;
+  connectors: ConnectorInfo[];
   patch: (p: Partial<DesignNode>) => void;
 }) {
   if (!kit) {
@@ -285,10 +280,13 @@ function InstanceSection({
       <p className="font-mono text-[10px] text-muted-foreground">{kit.id}</p>
       {Object.entries(kit.props).map(([key, prop]) => (
         <PropField
-          key={key}
+          // node.id in the key resets BindingControl's local mode state
+          // (data-intent, remembered custom value) when selection changes.
+          key={`${node.id}:${key}`}
           name={key}
           prop={prop}
           value={node.props?.[key]}
+          connectors={connectors}
           onCommit={(v) => setProp(key, v)}
         />
       ))}
@@ -296,41 +294,39 @@ function InstanceSection({
   );
 }
 
-/** One dynamic prop editor, typed by the kit component's metadata. */
+/**
+ * One dynamic prop editor, typed by the kit component's metadata. Every prop
+ * is bindable: a BindingControl whose kind follows the kit prop type, so e.g.
+ * progress-bar's percent offers exactly the number-typed connector fields.
+ * The renderer accepts "{{path}}" strings for number props (mergeProps
+ * coerces numeric strings), so bound values round-trip as strings.
+ */
 function PropField({
   name,
   prop,
   value,
+  connectors,
   onCommit,
 }: {
   name: string;
   prop: KitProp;
   value: unknown;
+  connectors: ConnectorInfo[];
   onCommit: (v: unknown) => void;
 }) {
-  const current = value ?? prop.default ?? "";
-  if (prop.type === "number") {
-    return (
-      <NumberField
-        label={name}
-        title={prop.description}
-        value={typeof current === "number" ? current : Number(current) || 0}
-        onCommit={onCommit}
-      />
-    );
-  }
-  const text = String(current);
-  // "color"-typed props, plus string props whose value looks like a color,
-  // get a swatch next to the text input.
-  if (prop.type === "color" || /^#[0-9a-fA-F]{3,8}$/.test(text)) {
-    return <ColorField label={name} title={prop.description} value={text} onCommit={onCommit} />;
-  }
+  const kind: BindingKind = prop.type === "number" ? "number" : "string";
+  const current = value ?? prop.default ?? (kind === "number" ? 0 : "");
   return (
     <Field label={name} title={prop.description}>
-      <Input
-        value={text}
-        className="h-8 text-xs"
-        onChange={(e) => onCommit(e.target.value)}
+      <BindingControl
+        kind={kind}
+        value={
+          typeof current === "string" || typeof current === "number"
+            ? current
+            : String(current)
+        }
+        fields={connectors}
+        onChange={onCommit}
       />
     </Field>
   );
