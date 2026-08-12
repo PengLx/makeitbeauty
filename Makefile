@@ -5,7 +5,7 @@
 INTER_URL := https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
 fonts:
 	tmp=$$(mktemp -d) && \
-	curl -fsSL -o $$tmp/inter.zip $(INTER_URL) && \
+	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o $$tmp/inter.zip $(INTER_URL) && \
 	unzip -o -j $$tmp/inter.zip extras/ttf/Inter-Regular.ttf extras/ttf/Inter-Bold.ttf -d apps/renderer/fonts/ && \
 	rm -rf $$tmp
 
