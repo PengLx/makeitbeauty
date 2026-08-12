@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, RefreshCw, Save, X } from "lucide-react";
 import { Palette } from "./Palette";
 import { DesignCanvas } from "./DesignCanvas";
+import { CanvasToolbar } from "./CanvasToolbar";
 import { CodePane } from "./CodePane";
 import { PreviewPane } from "./PreviewPane";
 import { Inspector } from "./Inspector";
@@ -11,6 +12,7 @@ import { SessionControls } from "./SessionControls";
 import { usePreview } from "../hooks/usePreview";
 import { useKit, type KitComponent } from "../hooks/useKit";
 import { useConnectors } from "../hooks/useConnectors";
+import { useSnapSettings } from "../hooks/useSnapSettings";
 import { useMyComponents } from "../hooks/useMyComponents";
 import { useComponentDefs } from "../hooks/useComponentDefs";
 import {
@@ -34,6 +36,7 @@ import {
   nextNodeId,
   removeNode,
   updateNode,
+  type DesignCanvasSpec,
   type DesignDoc,
   type DesignNode,
 } from "@/lib/design";
@@ -128,6 +131,9 @@ export function Editor({ me, projectId, onBack }: Props) {
   // Lives at the Editor level so the preview survives tab switches. Sends the
   // CURRENT project design; null (still loading) skips rendering.
   const preview = usePreview(design);
+
+  // Snap preferences (persisted to "mib.snap", shared with the Studio).
+  const [snap, setSnap] = useSnapSettings();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,6 +251,22 @@ export function Editor({ me, projectId, onBack }: Props) {
 
   function patchNode(id: string, patch: Partial<DesignNode>) {
     if (design) applyDesign(updateNode(design, id, patch));
+  }
+
+  /**
+   * Canvas edits from the boundary resize handles AND the inspector's canvas
+   * panel (width/height/background/radius). Goes through applyDesign, so the
+   * Code tab mirror and dirty tracking (canonical-serialization compare) pick
+   * it up like any node edit. Keys patched to `undefined` are dropped so the
+   * document serializes clean.
+   */
+  function patchCanvas(patch: Partial<DesignCanvasSpec>) {
+    if (!design) return;
+    const canvas = { ...design.canvas, ...patch } as Record<string, unknown>;
+    for (const key of Object.keys(canvas)) {
+      if (canvas[key] === undefined) delete canvas[key];
+    }
+    applyDesign({ ...design, canvas: canvas as unknown as DesignCanvasSpec });
   }
 
   function deleteNode(id: string) {
@@ -461,14 +483,17 @@ export function Editor({ me, projectId, onBack }: Props) {
                 <TabsTrigger value="code">Code</TabsTrigger>
               </TabsList>
             </div>
-            <TabsContent value="design" className="flex min-h-0 flex-col">
+            <TabsContent value="design" className="relative flex min-h-0 flex-col">
+              <CanvasToolbar settings={snap} onChange={setSnap} />
               <DesignCanvas
                 design={design}
                 selectedId={selectedNodeId}
                 kitById={componentsById}
+                snap={snap}
                 onSelect={setSelectedNodeId}
                 onPatchNode={patchNode}
                 onDeleteNode={deleteNode}
+                onCanvasResize={patchCanvas}
               />
             </TabsContent>
             <TabsContent value="code" className="flex min-h-0 flex-col">
@@ -502,7 +527,9 @@ export function Editor({ me, projectId, onBack }: Props) {
                   : undefined
               }
               connectors={connectors ?? []}
+              canvas={design.canvas}
               onPatch={patchNode}
+              onPatchCanvas={patchCanvas}
             />
             <PreviewPane preview={preview} />
           </aside>

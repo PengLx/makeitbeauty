@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Copy, RefreshCw, Save, Upload, X } from "lucide-react";
 import { PropsPanel } from "./PropsPanel";
 import { DesignCanvas } from "./DesignCanvas";
+import { CanvasToolbar } from "./CanvasToolbar";
 import { Inspector } from "./Inspector";
 import { StudioPreview } from "./StudioPreview";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SessionControls } from "./SessionControls";
 import { VersionBadge } from "./ComponentList";
 import type { KitComponent } from "../hooks/useKit";
+import { useSnapSettings } from "../hooks/useSnapSettings";
 import {
   ApiError,
   getComponent,
@@ -31,6 +33,7 @@ import {
   nextNodeId,
   removeNode,
   updateNode,
+  type DesignCanvasSpec,
   type DesignDoc,
   type DesignNode,
 } from "@/lib/design";
@@ -110,6 +113,9 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
   const [publishError, setPublishError] = useState<ApiError | null>(null);
   /** Pinned ref of the version this dialog session froze, e.g. "a/b@3". */
   const [publishedRef, setPublishedRef] = useState<string | null>(null);
+
+  // Snap preferences (persisted to "mib.snap", shared with the Editor).
+  const [snap, setSnap] = useSnapSettings();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -227,6 +233,22 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
       ...def,
       nodes: updateNode(designView, id, patch).nodes as FragmentNode[],
     });
+  }
+
+  /**
+   * Frame edits from the canvas boundary handles AND the inspector's frame
+   * panel. def.frame is the single source of truth — designView's canvas and
+   * the frameLabel both derive from it via useMemo, so every surface tracks
+   * live. Width/height only: a component frame has no background/radius
+   * (kit-component.schema.json); the studio canvas/preview always paint
+   * PREVIEW_BACKGROUND.
+   */
+  function patchFrame(patch: Partial<DesignCanvasSpec>) {
+    if (!def) return;
+    const w = patch.width ?? def.frame.w;
+    const h = patch.height ?? def.frame.h;
+    if (w === def.frame.w && h === def.frame.h) return;
+    applyDef({ ...def, frame: { w, h } });
   }
 
   function deleteNode(id: string) {
@@ -459,15 +481,18 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
             onRemoveProp={removeProp}
           />
 
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            <CanvasToolbar settings={snap} onChange={setSnap} />
             <DesignCanvas
               design={designView}
               selectedId={selectedNodeId}
               kitById={emptyKit}
               frameLabel={`${name} · ${def.frame.w}×${def.frame.h}`}
+              snap={snap}
               onSelect={setSelectedNodeId}
               onPatchNode={patchNode}
               onDeleteNode={deleteNode}
+              onCanvasResize={patchFrame}
             />
           </div>
 
@@ -490,7 +515,9 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
               kit={undefined}
               connectors={propConnectors}
               propsOnly
+              canvas={designView.canvas}
               onPatch={patchNode}
+              onPatchCanvas={patchFrame}
             />
             <StudioPreview def={def} />
           </aside>

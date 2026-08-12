@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { Puzzle } from "lucide-react";
 import {
@@ -10,10 +10,19 @@ import {
   type RectNode,
   type TextNode,
 } from "@/lib/design";
+import {
+  buildSnapTargets,
+  effectiveSnapOptions,
+  snapCanvasSize,
+  snapRect,
+  snapResizeRect,
+  type ResizeDir,
+  type SnapGuide,
+  type SnapSettings,
+  type SnapTargets,
+} from "@/lib/snapping";
 import type { KitComponent } from "@/hooks/useKit";
 import { cn } from "@/lib/utils";
-
-type ResizeDir = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 interface DragState {
   nodeId: string;
@@ -23,6 +32,8 @@ interface DragState {
   startY: number;
   /** Node frame at drag start. */
   frame: { x: number; y: number; w: number; h: number };
+  /** Snap targets frozen at gesture start (other nodes + canvas). */
+  targets: SnapTargets;
 }
 
 interface Props {
@@ -36,10 +47,67 @@ interface Props {
    * relative to the frame's top-left, not a full design canvas.
    */
   frameLabel?: string;
+  /**
+   * Snap preferences owned by the parent view (Editor / Studio, persisted to
+   * localStorage). Holding Shift during a gesture inverts grid AND object
+   * snapping live — pointermove's own shiftKey is read every move.
+   */
+  snap: SnapSettings;
   onSelect: (id: string | null) => void;
   onPatchNode: (id: string, patch: Partial<DesignNode>) => void;
   onDeleteNode: (id: string) => void;
+  /**
+   * Canvas self-resize (Figma frame feel): dragging the canvas's right edge,
+   * bottom edge or bottom-right corner emits live size patches — integers,
+   * grid-snapped through the same effectiveSnapOptions gesture pattern as
+   * node ops (grid only; the canvas has no object targets) and clamped to
+   * [CANVAS_MIN_SIZE, CANVAS_MAX_SIZE]. The Editor patches design.canvas,
+   * the Studio patches definition.frame. Omit to hide the handles.
+   */
+  onCanvasResize?: (patch: { width?: number; height?: number }) => void;
 }
+
+/** Canvas edges that can be dragged: right, bottom, bottom-right corner. */
+type CanvasResizeDir = "e" | "s" | "se";
+
+interface CanvasDragState {
+  dir: CanvasResizeDir;
+  /** Pointer position at drag start (client coords). */
+  startX: number;
+  startY: number;
+  /** Canvas size at drag start. */
+  startW: number;
+  startH: number;
+}
+
+/**
+ * Canvas-boundary resize affordances. Hit areas straddle the edge (4px
+ * inside, 8px outside) so they're easy to grab without stealing clicks from
+ * nodes laid out against the border; the visible strip/grip lives in a child
+ * span so the highlight stays thin while the target stays fat.
+ */
+const CANVAS_EDGE_HANDLES: {
+  dir: Exclude<CanvasResizeDir, "se">;
+  hit: string;
+  strip: string;
+  cursor: string;
+  label: string;
+}[] = [
+  {
+    dir: "e",
+    hit: "inset-y-0 -right-2 w-3",
+    strip: "inset-y-0 left-1/2 w-0.5 -translate-x-1/2",
+    cursor: "ew-resize",
+    label: "Resize canvas width",
+  },
+  {
+    dir: "s",
+    hit: "inset-x-0 -bottom-2 h-3",
+    strip: "inset-x-0 top-1/2 h-0.5 -translate-y-1/2",
+    cursor: "ns-resize",
+    label: "Resize canvas height",
+  },
+];
 
 const HANDLES: { dir: ResizeDir; className: string; cursor: string }[] = [
   { dir: "nw", className: "left-0 top-0 -translate-x-1/2 -translate-y-1/2", cursor: "nwse-resize" },
@@ -93,13 +161,21 @@ export function DesignCanvas({
   selectedId,
   kitById,
   frameLabel,
+  snap,
   onSelect,
   onPatchNode,
   onDeleteNode,
+  onCanvasResize,
 }: Props) {
   const drag = useRef<DragState | null>(null);
+  const canvasDrag = useRef<CanvasDragState | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const selected = findNode(design, selectedId);
+  // Guide lines for the active gesture's object/canvas snaps; [] when idle.
+  const [guides, setGuides] = useState<SnapGuide[]>([]);
+  // Mirrors canvasDrag for rendering: keeps the grabbed strip/grip highlighted
+  // and the live size readout visible while the pointer roams off the handle.
+  const [canvasResizing, setCanvasResizing] = useState<CanvasResizeDir | null>(null);
 
   function beginDrag(e: PointerEvent, nodeId: string, mode: DragState["mode"]) {
     const node = findNode(design, nodeId);
@@ -114,6 +190,8 @@ export function DesignCanvas({
       startX: e.clientX,
       startY: e.clientY,
       frame: { x: node.x, y: node.y, w: node.w, h: node.h },
+      // Built once per gesture, not per move.
+      targets: buildSnapTargets(design.nodes, nodeId, design.canvas),
     };
   }
 
@@ -122,28 +200,84 @@ export function DesignCanvas({
     if (!d) return;
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
+    // Shift inverts BOTH toggles for this gesture; pointermove carries the
+    // modifier, so releasing Shift mid-drag reverts live.
+    const opts = effectiveSnapOptions(snap, e.shiftKey);
+    let nextGuides: SnapGuide[];
     if (d.mode === "move") {
-      onPatchNode(d.nodeId, {
-        x: Math.round(d.frame.x + dx),
-        y: Math.round(d.frame.y + dy),
-      });
+      const snapped = snapRect(
+        { x: d.frame.x + dx, y: d.frame.y + dy, w: d.frame.w, h: d.frame.h },
+        d.targets,
+        opts,
+      );
+      onPatchNode(d.nodeId, { x: snapped.x, y: snapped.y });
+      nextGuides = snapped.guides;
     } else {
-      onPatchNode(d.nodeId, resizeFrame(d.frame, d.mode, dx, dy));
+      const { guides: resizeGuides, ...frame } = snapResizeRect(
+        resizeFrame(d.frame, d.mode, dx, dy),
+        d.mode,
+        d.targets,
+        opts,
+      );
+      onPatchNode(d.nodeId, frame);
+      nextGuides = resizeGuides;
     }
+    // Keep the [] reference stable while idle so React can bail out.
+    setGuides((prev) => (prev.length === 0 && nextGuides.length === 0 ? prev : nextGuides));
   }
 
   function endDrag() {
     drag.current = null;
+    setGuides((prev) => (prev.length === 0 ? prev : []));
+  }
+
+  /** Grab a canvas edge/corner: node selection clears — the gesture targets the canvas itself. */
+  function beginCanvasResize(e: PointerEvent, dir: CanvasResizeDir) {
+    if (!onCanvasResize) return;
+    e.stopPropagation();
+    onSelect(null);
+    wrapperRef.current?.focus({ preventScroll: true });
+    (e.target as Element).setPointerCapture(e.pointerId);
+    canvasDrag.current = {
+      dir,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: design.canvas.width,
+      startH: design.canvas.height,
+    };
+    setCanvasResizing(dir);
+  }
+
+  function handleCanvasResizeMove(e: PointerEvent) {
+    const d = canvasDrag.current;
+    if (!d || !onCanvasResize) return;
+    // Same live Shift inversion as node gestures; grid-only by construction
+    // (snapCanvasSize ignores opts.objects — the canvas has no object targets).
+    const opts = effectiveSnapOptions(snap, e.shiftKey);
+    const patch: { width?: number; height?: number } = {};
+    if (d.dir !== "s") patch.width = snapCanvasSize(d.startW + (e.clientX - d.startX), opts);
+    if (d.dir !== "e") patch.height = snapCanvasSize(d.startH + (e.clientY - d.startY), opts);
+    onCanvasResize(patch);
+  }
+
+  function endCanvasResize() {
+    canvasDrag.current = null;
+    setCanvasResizing(null);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      endDrag(); // also clears any active guides
+      endCanvasResize();
       onSelect(null);
       return;
     }
     if (!selected) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
+      // Deleting mid-drag unmounts the pointer-capture element, so pointerup
+      // never fires — end the gesture here or guides/drag state leak.
+      endDrag();
       onDeleteNode(selected.id);
       return;
     }
@@ -188,6 +322,22 @@ export function DesignCanvas({
           borderRadius: design.canvas.radius ?? 0,
         }}
       >
+        {snap.grid && (
+          // WYSIWYG grid: dots at exactly the spacing positions snap to,
+          // replacing the decorative wrapper dots inside the canvas bounds.
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-[inherit]
+              [background-image:radial-gradient(circle,rgba(148,163,184,0.4)_1px,transparent_1px)]"
+            style={{
+              backgroundSize: `${snap.gridSize}px ${snap.gridSize}px`,
+              // The gradient dot sits at each tile's CENTER; shift the tiling
+              // by half a cell so dots land exactly on the gridSize multiples
+              // that snapping targets (0, gridSize, 2*gridSize, …).
+              backgroundPosition: `${-snap.gridSize / 2}px ${-snap.gridSize / 2}px`,
+            }}
+          />
+        )}
         {frameLabel && (
           <>
             <span className="pointer-events-none absolute -top-5 left-0 flex items-center gap-1 font-mono text-[10px] text-sky-400/90">
@@ -214,7 +364,9 @@ export function DesignCanvas({
 
         {selected && (
           <div
-            className="pointer-events-none absolute ring-2 ring-sky-500"
+            // z-30 keeps node handles grabbable above the canvas edge strips
+            // (z-10) when a selected node sits flush against the border.
+            className="pointer-events-none absolute z-30 ring-2 ring-sky-500"
             style={{
               left: selected.x,
               top: selected.y,
@@ -237,6 +389,79 @@ export function DesignCanvas({
               />
             ))}
           </div>
+        )}
+
+        {/* Active snap guides: 1px lines spanning target extent + dragged node. */}
+        {guides.map((g) => (
+          <div
+            key={`${g.axis}:${g.at}`}
+            aria-hidden
+            className="pointer-events-none absolute z-20 bg-sky-400"
+            style={
+              g.axis === "v"
+                ? { left: g.at, top: g.from, width: 1, height: g.to - g.from }
+                : { top: g.at, left: g.from, height: 1, width: g.to - g.from }
+            }
+          />
+        ))}
+
+        {/* Canvas self-resize: right/bottom edge strips + corner grip. The
+            canvas div's own width/height come straight from design.canvas, so
+            the grid overlay (inset-0) and these edge-anchored handles track
+            the live size on every mid-drag patch. */}
+        {onCanvasResize && (
+          <>
+            {CANVAS_EDGE_HANDLES.map((h) => (
+              <div
+                key={h.dir}
+                role="separator"
+                aria-label={h.label}
+                title={h.label}
+                onPointerDown={(e) => beginCanvasResize(e, h.dir)}
+                onPointerMove={handleCanvasResizeMove}
+                onPointerUp={endCanvasResize}
+                onPointerCancel={endCanvasResize}
+                className={cn("group absolute z-10 touch-none select-none", h.hit)}
+                style={{ cursor: h.cursor }}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute rounded-full bg-sky-500 opacity-0 transition-opacity group-hover:opacity-60",
+                    h.strip,
+                    canvasResizing === h.dir && "opacity-100 group-hover:opacity-100",
+                  )}
+                />
+              </div>
+            ))}
+            <div
+              role="separator"
+              aria-label="Resize canvas"
+              title="Resize canvas"
+              onPointerDown={(e) => beginCanvasResize(e, "se")}
+              onPointerMove={handleCanvasResizeMove}
+              onPointerUp={endCanvasResize}
+              onPointerCancel={endCanvasResize}
+              className="group absolute -right-2 -bottom-2 z-10 size-4 cursor-nwse-resize touch-none select-none"
+            >
+              {/* Always faintly visible — the founder ask was discoverability. */}
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute inset-0.5 rounded-[3px] border-2 border-sky-500 bg-background opacity-40 transition-opacity group-hover:opacity-100",
+                  canvasResizing === "se" && "opacity-100",
+                )}
+              />
+            </div>
+            {canvasResizing && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute top-full right-0 mt-2 font-mono text-[10px] text-sky-400"
+              >
+                {design.canvas.width}×{design.canvas.height}
+              </span>
+            )}
+          </>
         )}
       </div>
     </div>

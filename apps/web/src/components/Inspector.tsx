@@ -1,7 +1,17 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  type LucideIcon,
+} from "lucide-react";
+import {
   type DesignAnimation,
+  type DesignCanvasSpec,
   type DesignNode,
   type FontWeight,
   type TextAlign,
@@ -11,6 +21,14 @@ import {
   type TextNode,
   ANIMATION_PRESETS,
 } from "@/lib/design";
+import {
+  alignToCanvas,
+  clampCanvasSize,
+  CANVAS_MAX_SIZE,
+  CANVAS_MIN_SIZE,
+  type AlignEdge,
+} from "@/lib/snapping";
+import { Button } from "@/components/ui/button";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
 import type { ConnectorInfo } from "@/lib/api";
 import { BindingControl, FieldSelect, type BindingKind } from "@/components/BindingControl";
@@ -40,12 +58,43 @@ interface Props {
    * data), so the binding surfaces re-label from data language to props.
    */
   propsOnly?: boolean;
+  /**
+   * The canvas/frame spec the selected node aligns against (the project
+   * canvas in the Editor, the component frame viewed as a canvas in the
+   * Studio). Enables the Layout section's align row and, with onPatchCanvas,
+   * the empty-selection canvas panel.
+   */
+  canvas?: DesignCanvasSpec;
   onPatch: (id: string, patch: Partial<DesignNode>) => void;
+  /**
+   * Canvas/frame property edits (same sink as the canvas boundary drag).
+   * With no node selected the inspector becomes the canvas panel: W/H (and
+   * background/radius in the Editor — a component frame has neither, per
+   * kit-component.schema.json; the Studio preview always paints #0d1117).
+   */
+  onPatchCanvas?: (patch: Partial<DesignCanvasSpec>) => void;
 }
 
-/** Right-column property editor for the selected node. */
-export function Inspector({ node, kit, connectors, propsOnly, onPatch }: Props) {
+/** Right-column property editor for the selected node — or, with nothing selected, the canvas/frame panel. */
+export function Inspector({
+  node,
+  kit,
+  connectors,
+  propsOnly,
+  canvas,
+  onPatch,
+  onPatchCanvas,
+}: Props) {
   if (!node) {
+    if (canvas && onPatchCanvas) {
+      return (
+        <CanvasPanel
+          canvas={canvas}
+          frameMode={propsOnly ?? false}
+          onPatchCanvas={onPatchCanvas}
+        />
+      );
+    }
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center">
         <p className="text-xs leading-relaxed text-muted-foreground">
@@ -75,6 +124,7 @@ export function Inspector({ node, kit, connectors, propsOnly, onPatch }: Props) 
           <NumberField label="W" value={node.w} min={1} onCommit={(v) => patch({ w: v })} />
           <NumberField label="H" value={node.h} min={1} onCommit={(v) => patch({ h: v })} />
         </div>
+        {canvas && <AlignRow node={node} canvas={canvas} patch={patch} />}
         <Field label={`Opacity · ${Math.round((node.opacity ?? 1) * 100)}%`}>
           <Slider
             value={[Math.round((node.opacity ?? 1) * 100)]}
@@ -98,6 +148,114 @@ export function Inspector({ node, kit, connectors, propsOnly, onPatch }: Props) 
       />
       <Separator />
       <AnimationSection node={node} patch={patch} />
+    </div>
+  );
+}
+
+/**
+ * Empty-selection state: the canvas's own properties (the founder ask — the
+ * overall size must be adjustable without touching code). W/H share the
+ * interactive clamp range with the boundary-drag handles ([64, 4096]; the
+ * schema floor is 1, but below ~64 the editor chrome swallows the surface —
+ * see CANVAS_MIN_SIZE). In frame mode (Component Studio, keyed off
+ * propsOnly) only W/H show: kit-component.schema.json gives frames no
+ * background/radius, and the studio canvas/preview always paint #0d1117.
+ */
+function CanvasPanel({
+  canvas,
+  frameMode,
+  onPatchCanvas,
+}: {
+  canvas: DesignCanvasSpec;
+  frameMode: boolean;
+  onPatchCanvas: (patch: Partial<DesignCanvasSpec>) => void;
+}) {
+  return (
+    <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <Section title={frameMode ? "Frame" : "Canvas"}>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField
+            label="W"
+            value={canvas.width}
+            min={CANVAS_MIN_SIZE}
+            max={CANVAS_MAX_SIZE}
+            onCommit={(v) => onPatchCanvas({ width: clampCanvasSize(v) })}
+          />
+          <NumberField
+            label="H"
+            value={canvas.height}
+            min={CANVAS_MIN_SIZE}
+            max={CANVAS_MAX_SIZE}
+            onCommit={(v) => onPatchCanvas({ height: clampCanvasSize(v) })}
+          />
+        </div>
+        {!frameMode && (
+          <>
+            <ColorField
+              label="Background"
+              value={canvas.background ?? ""}
+              placeholder="transparent"
+              onCommit={(v) => onPatchCanvas({ background: v || undefined })}
+            />
+            <NumberField
+              label="Corner radius"
+              value={canvas.radius ?? 0}
+              min={0}
+              onCommit={(v) =>
+                onPatchCanvas({ radius: v > 0 ? Math.round(v) : undefined })
+              }
+            />
+          </>
+        )}
+      </Section>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Tip: drag the {frameMode ? "frame" : "canvas"}'s right or bottom edge
+        to resize it. Click a node to edit it, or insert one from the palette.
+      </p>
+    </div>
+  );
+}
+
+const ALIGNMENTS: { edge: AlignEdge; label: string; Icon: LucideIcon }[] = [
+  { edge: "left", label: "Align left", Icon: AlignStartVertical },
+  { edge: "centerX", label: "Align horizontal center", Icon: AlignCenterVertical },
+  { edge: "right", label: "Align right", Icon: AlignEndVertical },
+  { edge: "top", label: "Align top", Icon: AlignStartHorizontal },
+  { edge: "centerY", label: "Align vertical center", Icon: AlignCenterHorizontal },
+  { edge: "bottom", label: "Align bottom", Icon: AlignEndHorizontal },
+];
+
+/**
+ * Align the selected node to the canvas (Editor) or component frame
+ * (Studio): left/centerX/right, top/centerY/bottom. Integer math via
+ * alignToCanvas; exactly one design mutation per click.
+ */
+function AlignRow({
+  node,
+  canvas,
+  patch,
+}: {
+  node: DesignNode;
+  canvas: { width: number; height: number };
+  patch: (p: Partial<DesignNode>) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">Align to canvas</Label>
+      <div className="flex items-center gap-0.5">
+        {ALIGNMENTS.map(({ edge, label, Icon }) => (
+          <Button
+            key={edge}
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            title={label}
+            onClick={() => patch(alignToCanvas(node, canvas, edge))}
+          >
+            <Icon />
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -481,18 +639,28 @@ function NumberField({
   title?: string;
   onCommit: (v: number) => void;
 }) {
+  // While the field is being edited, display exactly what was typed instead
+  // of the committed value. Commits still fire per keystroke (live canvas
+  // preview), but a commit that normalizes the input — e.g. the canvas
+  // panel's clampCanvasSize — must not rewrite the text mid-entry: typing
+  // "630" into a [64, 4096]-clamped field would otherwise become
+  // 6 → 64 → "64"+3 → 643 → 6430 → 4096, making most values untypeable.
+  // On blur the draft drops and the field resyncs to the committed value.
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <Field label={label} title={title}>
       <Input
         type="number"
-        value={value}
+        value={draft ?? value}
         min={min}
         max={max}
         className="h-8 text-xs"
         onChange={(e) => {
+          setDraft(e.target.value);
           const v = Math.round(Number(e.target.value));
           if (Number.isFinite(v)) onCommit(v);
         }}
+        onBlur={() => setDraft(null)}
       />
     </Field>
   );
