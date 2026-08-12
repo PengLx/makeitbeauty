@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Database, Plug, RefreshCw } from "lucide-react";
+import { Database, RefreshCw } from "lucide-react";
 import {
   ApiError,
   listConnectors,
@@ -7,6 +7,7 @@ import {
   type ConnectorInfo,
   type ConnectorStatus,
 } from "@/lib/api";
+import { ConnectorIcon } from "@/components/ConnectorIcon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -124,7 +125,10 @@ export function DataDialog({ dev }: Props) {
               <li key={c.connector} className="rounded-lg border px-3 py-2">
                 <div className="flex items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm font-medium">
-                    <Plug className="size-3.5 shrink-0 text-muted-foreground" />
+                    <ConnectorIcon
+                      connector={c.connector}
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
                     {c.connector}
                   </span>
                   <StatusBadge status={c.status} />

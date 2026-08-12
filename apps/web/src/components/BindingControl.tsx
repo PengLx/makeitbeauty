@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { ConnectorInfo, ConnectorStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ConnectorIcon } from "@/components/ConnectorIcon";
 import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -44,23 +43,26 @@ export function qualifyPath(connector: string, path: string): string {
   return path.startsWith(`${connector}.`) ? path : `${connector}.${path}`;
 }
 
-const STATUS_CLASSES: Record<ConnectorStatus, string> = {
-  connected: "border-emerald-500/40 text-emerald-500",
-  unconfigured: "text-muted-foreground",
-  expired: "border-amber-500/40 text-amber-500",
+/** Display form of a field path once an icon already names the connector. */
+function pathTail(connector: string, path: string): string {
+  return path.startsWith(`${connector}.`) ? path.slice(connector.length + 1) : path;
+}
+
+/** First path segment — by convention the connector name ("github.user.name"). */
+function pathConnector(path: string): string {
+  const dot = path.indexOf(".");
+  return dot > 0 ? path.slice(0, dot) : path;
+}
+
+const STATUS_DOT: Partial<Record<ConnectorStatus, string>> = {
+  expired: "bg-amber-500",
+  unconfigured: "bg-muted-foreground/50",
 };
 
-function StatusBadge({ status }: { status: ConnectorStatus }) {
-  return (
-    <span
-      className={`rounded-full border px-1.5 text-[9px] uppercase tracking-wider ${
-        STATUS_CLASSES[status] ?? "text-muted-foreground"
-      }`}
-    >
-      {status}
-    </span>
-  );
-}
+const STATUS_HINT: Partial<Record<ConnectorStatus, string>> = {
+  expired: "Credentials expired",
+  unconfigured: "Not configured",
+};
 
 function TypeBadge({ type }: { type: BindingKind }) {
   return (
@@ -70,12 +72,68 @@ function TypeBadge({ type }: { type: BindingKind }) {
   );
 }
 
+/** One selectable connector chip in the picker's step-1 row. */
+function ConnectorChip({
+  info,
+  active,
+  iconOnly,
+  onSelect,
+}: {
+  info: ConnectorInfo;
+  active: boolean;
+  iconOnly: boolean;
+  onSelect: () => void;
+}) {
+  const dot = STATUS_DOT[info.status];
+  const hint = STATUS_HINT[info.status];
+  const chip = (
+    <button
+      type="button"
+      aria-pressed={active}
+      aria-label={info.connector}
+      onClick={onSelect}
+      className={cn(
+        "inline-flex h-6 min-w-0 items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        active
+          ? "border-ring/60 bg-secondary text-secondary-foreground ring-1 ring-ring/40"
+          : "border-input text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+      )}
+    >
+      <ConnectorIcon connector={info.connector} className="size-3 shrink-0" />
+      {!iconOnly && <span className="truncate">{info.connector}</span>}
+      {dot && (
+        <span
+          className={cn("size-1.5 shrink-0 rounded-full", dot)}
+          aria-hidden="true"
+        />
+      )}
+    </button>
+  );
+  // Tooltip only when the chip hides something: its name (icon-only row)
+  // and/or its non-connected status (the tiny dot).
+  if (!hint && !iconOnly) return chip;
+  const label = [iconOnly ? info.connector : null, hint]
+    .filter(Boolean)
+    .join(" — ");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{chip}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /**
- * Grouped connector-field picker: one group per connector (label = name +
- * status badge when not connected), items show the qualified path and the
- * field description. `kind` filters to one field type; leaving it undefined
- * lists every field with a type badge instead (the text-node insert surface,
- * where numbers stringify). Connectors with no matching fields are omitted.
+ * Two-step connector-field picker: step 1 is a chip row (icon + name) of the
+ * connectors that have at least one field matching the `kind` filter; step 2
+ * is a Select over the chosen connector's fields only (items = mono path tail
+ * + muted description — the chip's icon already names the connector).
+ * Leaving `kind` undefined lists every field with a type badge instead (the
+ * text-node insert surface, where numbers stringify).
+ *
+ * Connector selection resolves, in order: the user's last chip click in this
+ * instance → the bound value's connector → the sole eligible connector.
+ * With one connector (today's GitHub-only reality) step 1 costs no clicks.
  */
 export function FieldSelect({
   connectors,
@@ -83,6 +141,7 @@ export function FieldSelect({
   value,
   placeholder,
   id,
+  defaultConnector,
   onPick,
 }: {
   connectors: ConnectorInfo[];
@@ -91,9 +150,11 @@ export function FieldSelect({
   value: string;
   placeholder: string;
   id?: string;
+  /** Seeds the chip selection at mount (a parent's remembered last pick). */
+  defaultConnector?: string | null;
   onPick: (qualifiedPath: string) => void;
 }) {
-  const groups = connectors
+  const eligible = connectors
     .map((c) => ({
       info: c,
       fields: (c.fields ?? []).filter(
@@ -102,42 +163,78 @@ export function FieldSelect({
     }))
     .filter((g) => g.fields.length > 0);
 
+  const boundConnector = value ? pathConnector(value) : null;
+
+  // The user's explicit chip choice, remembered for this control instance.
+  // Seeded from the bound value's connector when one exists at mount (the
+  // current truth beats any remembered pick), else the parent's memory.
+  const [chosen, setChosen] = useState<string | null>(
+    boundConnector ?? defaultConnector ?? null,
+  );
+  // When the bound connector changes (picking commits, or a code-pane edit
+  // rebinds externally), it becomes the chip selection — render-time state
+  // reconciliation, same idiom as deriving state from props.
+  const [prevBound, setPrevBound] = useState(boundConnector);
+  if (boundConnector !== prevBound) {
+    setPrevBound(boundConnector);
+    if (boundConnector !== null) setChosen(boundConnector);
+  }
+
+  const isEligible = (name: string | null) =>
+    name !== null && eligible.some((g) => g.info.connector === name);
+  const selected =
+    (isEligible(chosen) ? chosen : null) ??
+    (isEligible(boundConnector) ? boundConnector : null) ??
+    (eligible.length === 1 ? eligible[0].info.connector : null);
+  const group = eligible.find((g) => g.info.connector === selected);
+
+  // Many connectors: drop names so the row still fits a 320px column;
+  // tooltips take over naming.
+  const iconOnly = eligible.length > 4;
+
   return (
-    <Select value={value} onValueChange={onPick}>
-      <SelectTrigger size="sm" id={id} className="w-full">
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {groups.map(({ info, fields }) => (
-          <SelectGroup key={info.connector}>
-            <SelectLabel className="flex items-center gap-1.5">
-              {info.connector}
-              {info.status !== "connected" && (
-                <StatusBadge status={info.status} />
-              )}
-            </SelectLabel>
-            {fields.map((f) => {
-              const qualified = qualifyPath(info.connector, f.path);
-              return (
-                <SelectItem key={qualified} value={qualified}>
-                  <span className="flex min-w-0 flex-col items-start gap-0.5">
-                    <span className="flex items-center gap-1.5 font-mono text-xs">
-                      {qualified}
-                      {kind === undefined && <TypeBadge type={f.type} />}
-                    </span>
-                    {f.description && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {f.description}
-                      </span>
-                    )}
-                  </span>
-                </SelectItem>
-              );
-            })}
-          </SelectGroup>
+    <div className="space-y-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {eligible.map(({ info }) => (
+          <ConnectorChip
+            key={info.connector}
+            info={info}
+            active={info.connector === selected}
+            iconOnly={iconOnly}
+            onSelect={() => setChosen(info.connector)}
+          />
         ))}
-      </SelectContent>
-    </Select>
+      </div>
+      <Select
+        value={group && boundConnector === selected ? value : ""}
+        onValueChange={onPick}
+        disabled={!group}
+      >
+        <SelectTrigger size="sm" id={id} className="w-full">
+          <SelectValue placeholder={group ? placeholder : "Pick a connector…"} />
+        </SelectTrigger>
+        <SelectContent>
+          {group?.fields.map((f) => {
+            const qualified = qualifyPath(group.info.connector, f.path);
+            return (
+              <SelectItem key={qualified} value={qualified}>
+                <span className="flex min-w-0 flex-col items-start gap-0.5">
+                  <span className="flex items-center gap-1.5 font-mono text-xs">
+                    {pathTail(group.info.connector, f.path)}
+                    {kind === undefined && <TypeBadge type={f.type} />}
+                  </span>
+                  {f.description && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {f.description}
+                    </span>
+                  )}
+                </span>
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 
@@ -209,6 +306,10 @@ export function BindingControl({
     if (boundPath(value) === null) lastCustom.current = value;
   }, [value]);
 
+  // Last connector the user bound through this control — seeds the picker's
+  // chip selection when it remounts (Custom↔Data flips unmount FieldSelect).
+  const lastConnector = useRef<string | null>(null);
+
   const bindable = fields.some((c) =>
     (c.fields ?? []).some((f) => f.type === kind),
   );
@@ -220,6 +321,7 @@ export function BindingControl({
 
   function pick(path: string) {
     setDataIntent(false);
+    lastConnector.current = pathConnector(path);
     onChange(`{{${path}}}`);
   }
 
@@ -255,9 +357,15 @@ export function BindingControl({
           )}
         </div>
         {bound !== null && (
-          <span className="flex min-w-0 flex-1 items-center gap-0.5 rounded-md bg-secondary py-0.5 pr-0.5 pl-1.5 text-secondary-foreground">
+          <span className="flex min-w-0 flex-1 items-center gap-1 rounded-md bg-secondary py-0.5 pr-0.5 pl-1.5 text-secondary-foreground">
+            {/* Icon names the connector, so the path drops its prefix —
+                display only; the stored value stays fully qualified. */}
+            <ConnectorIcon
+              connector={pathConnector(bound)}
+              className="size-3 shrink-0"
+            />
             <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
-              {bound}
+              {pathTail(pathConnector(bound), bound)}
             </span>
             <button
               type="button"
@@ -286,6 +394,7 @@ export function BindingControl({
           value={bound ?? ""}
           placeholder="Choose a field…"
           id={id}
+          defaultConnector={lastConnector.current}
           onPick={pick}
         />
       )}
