@@ -35,8 +35,10 @@ COPY packages/action/package.json packages/action/
 COPY packages/kit/package.json packages/kit/
 COPY packages/schema/package.json packages/schema/
 COPY packages/twc/package.json packages/twc/
-# --filter also pulls workspace dependencies (@makeitbeauty/twc) into the install
-RUN pnpm install --frozen-lockfile --filter @makeitbeauty/renderer
+# twc must be SELECTED (not just pulled in as a workspace dependency):
+# only selected projects get their devDependencies installed, and twc's
+# build needs its own typescript.
+RUN pnpm install --frozen-lockfile --filter @makeitbeauty/renderer --filter @makeitbeauty/twc
 
 # twc (workspace dep) must be built before the renderer's tsc can resolve it
 COPY packages/twc/tsconfig.json packages/twc/
@@ -47,7 +49,7 @@ RUN pnpm --filter @makeitbeauty/twc build \
  && pnpm --filter @makeitbeauty/renderer build \
  # replace the dev install with production-only node_modules for the runtime stage
  && rm -rf node_modules apps/renderer/node_modules packages/twc/node_modules \
- && pnpm install --prod --frozen-lockfile --filter @makeitbeauty/renderer
+ && pnpm install --prod --frozen-lockfile --filter @makeitbeauty/renderer --filter @makeitbeauty/twc
 
 # ---- runtime --------------------------------------------------------------
 FROM node:24-slim
