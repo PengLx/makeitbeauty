@@ -8,6 +8,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
@@ -49,4 +50,16 @@ func (r *Registry) Register(c Connector) {
 func (r *Registry) Get(name string) (Connector, bool) {
 	c, ok := r.byName[name]
 	return c, ok
+}
+
+// Names returns the registered connector names, sorted. Used by binding
+// derivation to distinguish real connector references from literal text
+// that merely looks like a {{template}}.
+func (r *Registry) Names() []string {
+	names := make([]string, 0, len(r.byName))
+	for name := range r.byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

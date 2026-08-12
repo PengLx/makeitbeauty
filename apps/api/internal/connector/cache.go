@@ -42,6 +42,11 @@ func (e *cacheEntry) fresh(now time.Time) bool {
 	return now.Sub(e.fetchedAt) < e.ttl
 }
 
+// KnownConnectors returns the names of all registered connectors, sorted.
+func (c *SnapshotCache) KnownConnectors() []string {
+	return c.registry.Names()
+}
+
 // NewSnapshotCache returns an empty cache backed by the given registry.
 func NewSnapshotCache(registry *Registry, log *slog.Logger) *SnapshotCache {
 	return &SnapshotCache{

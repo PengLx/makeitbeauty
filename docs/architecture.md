@@ -167,7 +167,9 @@ User ──< Project ──< Binding     project-level: which account + which fi
 User             { id, login, displayName, createdAt }
 ConnectorAccount { id, userId, connector, encryptedCredentials, status, lastRefreshAt }
 Project          { id, userId, name, design, bindings[], outputs[], createdAt, updatedAt }
-Binding          { connector, accountId, fields[] }
+Binding          { connector, accountId, fields[] }   — DERIVED, never client-authored:
+                 recomputed from the design's {{connector.field}} references on every
+                 project write; it is the consent record and render-time data filter
 Output           { id, theme: auto|light|dark, format: svg, filename }
 DeployToken      { id, projectId, hash, createdAt, revokedAt? }
 Snapshot         { userId, connector, data, fetchedAt, ttlSeconds }   (cache)
@@ -188,8 +190,11 @@ with KMS-managed keys (see SECURITY.md).
   (`Authorization: Bearer <token>`, constant-time compare). Resolves project →
   snapshots → renderer; responds `image/svg+xml` (body is the SVG, streamed).
   This is the endpoint the GitHub Action calls.
-- `POST /v1/preview` — dev/session auth. Body `{design, data?}`; omitted data falls
-  back to demo fixtures. Responds `image/svg+xml`. Used by the editor's live preview.
+- `POST /v1/preview` — session auth. Body `{design, data?}`; when data is omitted
+  the API derives the design's bindings and resolves the session user's own
+  connector snapshots — the exact path production renders take, so preview =
+  production for data too (the dev stub connector serves the demo fixture).
+  Responds `image/svg+xml`. Used by the editor's live preview.
 - `POST /v1/projects`, `GET /v1/projects`, `GET /v1/projects/{id}`,
   `PUT /v1/projects/{id}` (name/design/bindings/outputs), `DELETE /v1/projects/{id}`
   — session auth (dev: implicit user until GitHub App login lands).

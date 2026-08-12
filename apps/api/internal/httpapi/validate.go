@@ -15,8 +15,6 @@ import (
 
 var (
 	projectIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
-	connectorPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
-	fieldPattern     = regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
 	filenamePattern  = regexp.MustCompile(`^[a-zA-Z0-9._-]+\.svg$`)
 )
 
@@ -28,23 +26,6 @@ func validateName(name string) error {
 	}
 	if len(name) > nameMaxLength {
 		return fmt.Errorf("name must be at most %d characters", nameMaxLength)
-	}
-	return nil
-}
-
-func validateBindings(bindings []store.Binding) error {
-	for i, b := range bindings {
-		if !connectorPattern.MatchString(b.Connector) {
-			return fmt.Errorf("bindings[%d].connector must match ^[a-z0-9-]+$", i)
-		}
-		if len(b.Fields) == 0 {
-			return fmt.Errorf("bindings[%d].fields needs at least one field", i)
-		}
-		for j, f := range b.Fields {
-			if !fieldPattern.MatchString(f) {
-				return fmt.Errorf("bindings[%d].fields[%d] must match ^[a-zA-Z0-9_.]+$", i, j)
-			}
-		}
 	}
 	return nil
 }

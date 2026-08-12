@@ -61,28 +61,36 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve bindings → merged data: for each binding, take the (cached)
-	// connector snapshot and filter it down to exactly the bound fields.
-	// This filtering is the consent/security boundary — the renderer never
-	// sees unbound data.
-	data := map[string]any{}
-	for _, b := range project.Bindings {
-		account := s.resolveAccount(r, project.UserID, b)
-		snapshot, err := s.cache.Snapshot(ctx, project.UserID, b.Connector, account)
-		if err != nil {
-			if errors.Is(err, connector.ErrUnknown) {
-				s.log.Error("binding references unregistered connector", "project", project.ID, "connector", b.Connector)
-				writeError(w, http.StatusInternalServerError, "unknown_connector", "project is bound to an unavailable connector")
-				return
-			}
-			// Cold-miss upstream failure: nothing stale to serve, fail soft.
-			writeError(w, http.StatusBadGateway, "connector_unavailable", "connector data is unavailable")
-			return
-		}
-		data[b.Connector] = connector.Filter(snapshot, b.Fields)
+	data, ok := s.resolveBindingData(w, r, project.UserID, project.Bindings)
+	if !ok {
+		return
 	}
 
 	s.renderAndReply(w, r, project.Design, data, output.Theme)
+}
+
+// resolveBindingData merges the (cached) connector snapshots for a set of
+// bindings, filtered down to exactly the bound fields. This filtering is the
+// consent/security boundary — the renderer never sees unbound data. On
+// failure it writes the error envelope and returns ok=false.
+func (s *Server) resolveBindingData(w http.ResponseWriter, r *http.Request, ownerID string, bindings []store.Binding) (map[string]any, bool) {
+	data := map[string]any{}
+	for _, b := range bindings {
+		account := s.resolveAccount(r, ownerID, b)
+		snapshot, err := s.cache.Snapshot(r.Context(), ownerID, b.Connector, account)
+		if err != nil {
+			if errors.Is(err, connector.ErrUnknown) {
+				s.log.Error("binding references unregistered connector", "connector", b.Connector)
+				writeError(w, http.StatusInternalServerError, "unknown_connector", "bound connector is unavailable")
+				return nil, false
+			}
+			// Cold-miss upstream failure: nothing stale to serve, fail soft.
+			writeError(w, http.StatusBadGateway, "connector_unavailable", "connector data is unavailable")
+			return nil, false
+		}
+		data[b.Connector] = connector.Filter(snapshot, b.Fields)
+	}
+	return data, true
 }
 
 // resolveAccount finds the ConnectorAccount for a binding. Missing accounts
@@ -132,7 +140,17 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	data := req.Data
 	if data == nil {
-		data = s.demoData // omitted data falls back to the demo fixture
+		// No explicit data: resolve the session user's own connector
+		// snapshots for exactly the fields the design references — the same
+		// path production renders take, so preview = production for data
+		// too. (The dev stub connector serves the demo fixture, preserving
+		// the logged-out dev experience.)
+		bindings := deriveBindings(req.Design, s.cache.KnownConnectors())
+		resolved, ok := s.resolveBindingData(w, r, userID(r), bindings)
+		if !ok {
+			return
+		}
+		data = resolved
 	}
 
 	s.renderAndReply(w, r, req.Design, data, "")
@@ -208,15 +226,13 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "conflict", "a project with this id already exists")
 		return
 	}
-	if req.Bindings == nil {
-		req.Bindings = []store.Binding{}
-	}
+	// Bindings are always derived from the design, never client-authored —
+	// they are the consent record and render-time data filter, so they must
+	// track what the design actually references. Client-sent bindings are
+	// accepted on the wire for compatibility but ignored.
+	req.Bindings = deriveBindings(req.Design, s.cache.KnownConnectors())
 	if len(req.Outputs) == 0 {
 		req.Outputs = []store.Output{{ID: "default", Filename: "card.svg"}}
-	}
-	if err := validateBindings(req.Bindings); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
 	}
 	if err := validateOutputs(req.Outputs); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -263,17 +279,12 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "design is required")
 		return
 	}
-	// Omitted bindings/outputs keep their stored values; provided ones
-	// replace them and must satisfy the schema constraints.
-	if req.Bindings == nil {
-		req.Bindings = project.Bindings
-	}
+	// Bindings are recomputed from the design on every write (see
+	// handleCreateProject); client-sent bindings are ignored. Omitted
+	// outputs keep their stored values.
+	req.Bindings = deriveBindings(req.Design, s.cache.KnownConnectors())
 	if req.Outputs == nil {
 		req.Outputs = project.Outputs
-	}
-	if err := validateBindings(req.Bindings); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
 	}
 	if err := validateOutputs(req.Outputs); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())

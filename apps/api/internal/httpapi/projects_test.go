@@ -11,17 +11,34 @@ import (
 	"time"
 
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/config"
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/connector"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
 
-// newTestServer wires a Server with dev config and in-memory stores; the
-// renderer and cache stay nil because these tests never hit render paths.
+// fakeGitHub registers the "github" name so binding derivation recognizes it;
+// Fetch serves a tiny fixed snapshot for any test that resolves data.
+type fakeGitHub struct{}
+
+func (fakeGitHub) Name() string               { return "github" }
+func (fakeGitHub) SnapshotTTL() time.Duration { return time.Minute }
+func (fakeGitHub) Fetch(context.Context, *store.ConnectorAccount) (map[string]any, error) {
+	return map[string]any{"user": map[string]any{"login": "dev"}}, nil
+}
+
+// newTestServer wires a Server with dev config, in-memory stores, and a
+// snapshot cache whose registry knows the "github" name (project writes
+// derive bindings from the design, which consults the registry). The
+// renderer stays nil because these tests never render.
 func newTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
+	log := slog.New(slog.DiscardHandler)
+	registry := connector.NewRegistry()
+	registry.Register(fakeGitHub{})
 	s := &Server{
 		cfg:    config.Config{Env: "dev"},
-		log:    slog.New(slog.DiscardHandler),
+		log:    log,
 		stores: store.NewMemory(),
+		cache:  connector.NewSnapshotCache(registry, log),
 	}
 	return s, s.Handler()
 }
@@ -137,12 +154,9 @@ func TestUpdateProjectValidationTable(t *testing.T) {
 		{"bad output theme",
 			`{"name":"x","design":` + validDesign + `,"outputs":[{"id":"default","theme":"sepia","filename":"card.svg"}]}`,
 			http.StatusBadRequest, "invalid_request"},
-		{"binding without fields",
-			`{"name":"x","design":` + validDesign + `,"bindings":[{"connector":"github","fields":[]}]}`,
-			http.StatusBadRequest, "invalid_request"},
-		{"binding with bad connector",
-			`{"name":"x","design":` + validDesign + `,"bindings":[{"connector":"GitHub!","fields":["a"]}]}`,
-			http.StatusBadRequest, "invalid_request"},
+		{"client bindings ignored, even malformed ones",
+			`{"name":"Renamed","design":` + validDesign + `,"bindings":[{"connector":"GitHub!","fields":[]}]}`,
+			http.StatusOK, ""},
 		{"id change rejected",
 			`{"id":"other","name":"x","design":` + validDesign + `}`,
 			http.StatusBadRequest, "invalid_request"},
@@ -239,5 +253,45 @@ func TestDeleteProjectCascadesTokenRevocation(t *testing.T) {
 	rec = doJSON(t, h, http.MethodDelete, "/v1/projects/p1", "")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("second delete status = %d, want 404", rec.Code)
+	}
+}
+
+// Bindings are derived from the design on every write: what the design
+// references is what gets bound — client-sent bindings never survive.
+func TestBindingsDerivedFromDesign(t *testing.T) {
+	s, h := newTestServer(t)
+	seedProject(t, s, "p1")
+
+	design := `{"version":0,"canvas":{"width":10,"height":10},"nodes":[` +
+		`{"id":"a","type":"text","x":0,"y":0,"w":5,"h":5,"text":"{{github.user.login}} / {{github.stats.totalStars}}"},` +
+		`{"id":"b","type":"text","x":0,"y":5,"w":5,"h":5,"text":"{{props.ignored}} {{unknownconn.field}}"}]}`
+
+	rec := doJSON(t, h, http.MethodPut, "/v1/projects/p1",
+		`{"name":"Bound","design":`+design+`,"bindings":[{"connector":"bogus","fields":["nope"]}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var p store.Project
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	want := []store.Binding{{Connector: "github", Fields: []string{"stats.totalStars", "user.login"}}}
+	if len(p.Bindings) != 1 || p.Bindings[0].Connector != want[0].Connector ||
+		strings.Join(p.Bindings[0].Fields, ",") != strings.Join(want[0].Fields, ",") {
+		t.Fatalf("derived bindings = %#v, want %#v", p.Bindings, want)
+	}
+
+	// A design with no templates derives empty bindings, replacing old ones.
+	rec = doJSON(t, h, http.MethodPut, "/v1/projects/p1",
+		`{"name":"Bound","design":{"version":0,"canvas":{"width":10,"height":10},"nodes":[]}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Bindings) != 0 {
+		t.Fatalf("bindings after template-free design = %#v, want empty", p.Bindings)
 	}
 }
