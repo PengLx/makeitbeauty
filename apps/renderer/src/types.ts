@@ -30,6 +30,8 @@ export interface NodeBase {
   opacity?: number;
   rotation?: number;
   animation?: Animation;
+  /** Tailwind-subset utility string (§5.6) — compiled by @makeitbeauty/twc; structured style fields override it. */
+  tw?: string;
 }
 
 export interface TextNode extends NodeBase {
@@ -76,6 +78,8 @@ export interface Canvas {
   height: number;
   background?: string;
   radius?: number;
+  /** Tailwind-subset utility string (§5.6) — e.g. a background gradient on the root. */
+  tw?: string;
 }
 
 export interface Design {

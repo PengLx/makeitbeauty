@@ -1,0 +1,65 @@
+{
+  "version": 0,
+  "name": "Demo tw card — gradients and shadows via the Tailwind subset",
+  "canvas": {
+    "width": 800,
+    "height": 420,
+    "radius": 16,
+    "tw": "bg-gradient-to-br from-indigo-950 via-purple-900 to-slate-900"
+  },
+  "nodes": [
+    {
+      "id": "panel",
+      "type": "rect",
+      "x": 40, "y": 40, "w": 720, "h": 340,
+      "tw": "bg-[rgba(255,255,255,0.06)] rounded-2xl border border-[rgba(255,255,255,0.14)] shadow-2xl"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "x": 80, "y": 84, "w": 640, "h": 52,
+      "text": "Hi, I'm {{github.user.name}}",
+      "tw": "text-white font-extrabold tracking-wide",
+      "style": { "fontSize": 40 }
+    },
+    {
+      "id": "accent",
+      "type": "rect",
+      "x": 80, "y": 152, "w": 260, "h": 6,
+      "tw": "bg-gradient-to-r from-cyan-400 to-fuchsia-500 rounded-full",
+      "animation": { "preset": "growX", "durationMs": 900 }
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "x": 80, "y": 184, "w": 640, "h": 24,
+      "text": "{{github.stats.totalContributions}} contributions this year · designed with MakeItBeauty",
+      "tw": "text-slate-300 font-medium tracking-wider",
+      "style": { "fontSize": 16 }
+    },
+    {
+      "id": "stars-pill",
+      "type": "text",
+      "x": 80, "y": 248, "w": 250, "h": 48,
+      "text": "★ {{github.stats.totalStars}} total stars",
+      "tw": "bg-[rgba(34,211,238,0.12)] text-cyan-300 font-semibold rounded-xl shadow-lg px-5 py-3",
+      "style": { "fontSize": 17 }
+    },
+    {
+      "id": "followers-pill",
+      "type": "text",
+      "x": 354, "y": 248, "w": 250, "h": 48,
+      "text": "{{github.user.followers}} followers",
+      "tw": "bg-[rgba(232,121,249,0.12)] text-fuchsia-300 font-semibold rounded-xl shadow-lg px-5 py-3",
+      "style": { "fontSize": 17 }
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "x": 80, "y": 330, "w": 640, "h": 20,
+      "text": "@{{github.user.login}} · {{github.stats.topLanguage}}",
+      "tw": "text-slate-400 tracking-widest font-medium",
+      "style": { "fontSize": 13 }
+    }
+  ]
+}

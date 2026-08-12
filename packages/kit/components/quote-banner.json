@@ -41,6 +41,7 @@
       "id": "bar",
       "type": "rect",
       "x": 64, "y": 62, "w": 96, "h": 3,
+      "tw": "bg-gradient-to-r from-[rgba(255,255,255,0.45)] to-[rgba(255,255,255,0)]",
       "style": { "fill": "{{props.accent}}", "radius": 1.5 },
       "animation": { "preset": "growX", "durationMs": 900, "delayMs": 200 }
     }

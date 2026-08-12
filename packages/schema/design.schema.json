@@ -17,7 +17,8 @@
         "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
         "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
         "background": { "$ref": "#/$defs/color" },
-        "radius": { "type": "number", "minimum": 0 }
+        "radius": { "type": "number", "minimum": 0 },
+        "tw": { "$ref": "#/$defs/tw" }
       }
     },
     "nodes": {
@@ -36,6 +37,11 @@
       "type": "string",
       "description": "Literal text with optional {{path.to.field}} substitutions.",
       "maxLength": 2000
+    },
+    "tw": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Tailwind-subset utility string compiled by @makeitbeauty/twc (architecture.md §5.6): gradients, shadows, borders, radii, colors, typography, opacity, padding. Whitelist: unknown classes are warnings, never failures or passthrough. Compiles first; explicit structured style fields override it. url()/var() cannot be expressed."
     },
     "animation": {
       "type": "object",
@@ -71,7 +77,8 @@
         "h": { "type": "number", "minimum": 0 },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "rotation": { "type": "number", "minimum": -360, "maximum": 360 },
-        "animation": { "$ref": "#/$defs/animation" }
+        "animation": { "$ref": "#/$defs/animation" },
+        "tw": { "$ref": "#/$defs/tw" }
       }
     },
     "node": {

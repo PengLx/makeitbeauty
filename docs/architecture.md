@@ -108,10 +108,19 @@ Secure cookies.
    External refs are not just broken-through-Camo — connector data + an
    attacker-chosen URL is an exfiltration beacon. This gate is a security boundary,
    not a linter.
-6. **Tailwind note**: satori's `tw` prop is experimental (twrnc-based) and is NOT
-   used. Editor styling compiles Tailwind-subset classes to plain style objects,
-   validated against satori's supported-property whitelist; unsupported classes are
-   editor lint errors.
+6. **Tailwind subset (`tw`)**: satori's `tw` prop is experimental (twrnc-based)
+   and is NOT used. Instead, nodes and the canvas carry an optional `tw` utility
+   string compiled by our own deterministic compiler (`packages/twc`, shared by
+   renderer and editor so semantics never drift): gradients
+   (`bg-gradient-to-*`, `from/via/to`), shadows (presets + arbitrary), borders,
+   radii, colors (standard Tailwind palette + `[#hex]` arbitrary values),
+   typography (weight/tracking/leading), opacity, padding. Whitelist policy:
+   unknown or unsupported classes are render-time warnings and editor lint —
+   never failures, never passthrough. Merge order: `tw` compiles first,
+   explicit structured `style` fields override it (Inspector edits always win
+   visibly). `url()` and any external reference cannot be expressed — the
+   compiler emits only vetted properties, and the output sanitizer still gates
+   the final SVG.
 7. **Instance expansion**: `instance` nodes resolve against the kit registry
    (`packages/kit/components`, format pinned by
    `packages/schema/kit-component.schema.json`): fragment nodes are uniform-scaled

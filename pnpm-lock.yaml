@@ -10,6 +10,9 @@ importers:
 
   apps/renderer:
     dependencies:
+      '@makeitbeauty/twc':
+        specifier: workspace:*
+        version: link:../../packages/twc
       ajv:
         specifier: ^8.17.1
         version: 8.20.0
@@ -90,6 +93,9 @@ importers:
       vite:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.11)
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.11)
 
   packages/action: {}
 
@@ -100,6 +106,15 @@ importers:
       ajv:
         specifier: ^8.17.1
         version: 8.20.0
+
+  packages/twc:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.11)
 
 packages:
 

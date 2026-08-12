@@ -4,6 +4,7 @@
  *
  *   pnpm demo       examples/demo-design.json     → out/demo.svg
  *   pnpm demo:kit   examples/demo-kit-design.json → out/demo-kit.svg
+ *   pnpm demo:tw    examples/demo-tw-design.json  → out/demo-tw.svg
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -14,9 +15,10 @@ import { repoPath } from "./paths.js";
 import type { Design } from "./types.js";
 import { validateDesign } from "./validate.js";
 
-const kitMode = process.argv[2] === "kit";
-const designFile = kitMode ? "demo-kit-design.json" : "demo-design.json";
-const outName = kitMode ? "demo-kit.svg" : "demo.svg";
+const mode = process.argv[2] === "kit" || process.argv[2] === "tw" ? process.argv[2] : "default";
+const designFile =
+  mode === "kit" ? "demo-kit-design.json" : mode === "tw" ? "demo-tw-design.json" : "demo-design.json";
+const outName = mode === "kit" ? "demo-kit.svg" : mode === "tw" ? "demo-tw.svg" : "demo.svg";
 
 const design = JSON.parse(readFileSync(repoPath("examples", designFile), "utf8"));
 const data = JSON.parse(readFileSync(repoPath("examples", "demo-data.json"), "utf8"));

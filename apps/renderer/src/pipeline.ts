@@ -47,6 +47,8 @@ export async function render(
     const r = resolveNodeTemplates(node, data);
     warnings.push(...r.warnings);
     if (r.value.type === "instance") {
+      // §5.6: tw does not apply to instance nodes yet (expansion complexity).
+      if (r.value.tw) warnings.push(`${r.value.id}: tw on instance nodes is not supported`);
       const expansion = expandInstance(r.value, registry, data);
       warnings.push(...expansion.warnings);
       items.push(...expansion.items);
@@ -65,15 +67,26 @@ export async function render(
     embedFont: true, // text → paths: no client-side font dependency
   };
 
+  // §5.6: tw compiles inside buildNode/buildCanvas; compiler warnings surface
+  // here prefixed with the node id (canvas tw compiles once, in the base pass).
   const basePass = await satori(
-    buildCanvas(design.canvas, staticNodes.map(buildNode)) as never,
+    buildCanvas(
+      design.canvas,
+      staticNodes.map((n) => buildNode(n, warnings)),
+      /* transparent */ false,
+      warnings,
+    ) as never,
     satoriOptions,
   );
 
   const animated: AnimatedLayer[] = [];
   for (const layer of layers) {
     const pass = await satori(
-      buildCanvas(design.canvas, layer.nodes.map(buildNode), /* transparent */ true) as never,
+      buildCanvas(
+        design.canvas,
+        layer.nodes.map((n) => buildNode(n, warnings)),
+        /* transparent */ true,
+      ) as never,
       satoriOptions,
     );
     animated.push({

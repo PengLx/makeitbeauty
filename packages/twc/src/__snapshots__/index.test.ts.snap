@@ -1,0 +1,86 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CATALOG > matches the snapshot (editor autocomplete contract) 1`] = `
+[
+  {
+    "doc": "Background color: bg-{family}-{50..950} (Tailwind v4 palette), bg-black|white|transparent, or bg-[#hex|rgb()|hsl()|named] -> backgroundColor.",
+    "kind": "color",
+    "prefix": "bg-",
+  },
+  {
+    "doc": "Gradient direction: t|tr|r|br|b|bl|l|tl (0/45/90/135/180/225/270/315deg). Combine with from-/via-/to- stops -> backgroundImage: linear-gradient().",
+    "kind": "gradient",
+    "prefix": "bg-gradient-to-",
+  },
+  {
+    "doc": "Gradient start color (0% stop): palette or arbitrary [..] color. Requires bg-gradient-to-*.",
+    "kind": "gradient",
+    "prefix": "from-",
+  },
+  {
+    "doc": "Gradient middle color (50% stop): palette or arbitrary [..] color. Requires bg-gradient-to-*.",
+    "kind": "gradient",
+    "prefix": "via-",
+  },
+  {
+    "doc": "Gradient end color (100% stop): palette or arbitrary [..] color. Requires bg-gradient-to-*.",
+    "kind": "gradient",
+    "prefix": "to-",
+  },
+  {
+    "doc": "Text color: palette or arbitrary [..] color -> color. (Sizes like text-lg are not supported.)",
+    "kind": "color",
+    "prefix": "text-",
+  },
+  {
+    "doc": "Font weight: thin|extralight|light|normal|medium|semibold|bold|extrabold|black or 100..900 -> fontWeight (number).",
+    "kind": "typography",
+    "prefix": "font-",
+  },
+  {
+    "doc": "Letter spacing: tighter|tight|normal|wide|wider|widest (em values on a 16px basis) or [Npx] -> letterSpacing.",
+    "kind": "typography",
+    "prefix": "tracking-",
+  },
+  {
+    "doc": "Line height: none|tight|snug|normal|relaxed|loose or unitless [N] -> lineHeight (number).",
+    "kind": "typography",
+    "prefix": "leading-",
+  },
+  {
+    "doc": "Border radius: rounded (4px), -none|-sm|-md|-lg|-xl|-2xl|-3xl, -full (9999px), or -[Npx] -> borderRadius.",
+    "kind": "radius",
+    "prefix": "rounded",
+  },
+  {
+    "doc": "Border: border (1px) and border-0|2|4|8 set borderWidth + borderStyle solid; border-{palette} or border-[..] set borderColor.",
+    "kind": "border",
+    "prefix": "border",
+  },
+  {
+    "doc": "Box shadow: shadow, -sm|-md|-lg|-xl|-2xl|-none (standard Tailwind strings, hardcoded) or shadow-[..] matching a strict grammar (2-4 lengths, one color; url()/var() rejected) -> boxShadow.",
+    "kind": "shadow",
+    "prefix": "shadow",
+  },
+  {
+    "doc": "Opacity: 0..100 in steps of 5 (opacity-60 -> 0.6) or [0.x] -> opacity (number).",
+    "kind": "opacity",
+    "prefix": "opacity-",
+  },
+  {
+    "doc": "Padding on all sides: p-{0..12} on the 4px scale -> paddingTop/Right/Bottom/Left.",
+    "kind": "spacing",
+    "prefix": "p-",
+  },
+  {
+    "doc": "Horizontal padding: px-{0..12} on the 4px scale -> paddingLeft/Right.",
+    "kind": "spacing",
+    "prefix": "px-",
+  },
+  {
+    "doc": "Vertical padding: py-{0..12} on the 4px scale -> paddingTop/Bottom.",
+    "kind": "spacing",
+    "prefix": "py-",
+  },
+]
+`;

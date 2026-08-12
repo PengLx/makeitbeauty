@@ -1,0 +1,26 @@
+{
+  "name": "@makeitbeauty/twc",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic Tailwind-subset compiler (tw utility string -> satori-safe style object). Pure, dependency-free; shared by renderer and editor so semantics never drift. Contract: docs/architecture.md section 5.6.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

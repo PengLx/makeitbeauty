@@ -9,9 +9,11 @@
     "build": "tsc",
     "test": "vitest run",
     "demo": "tsx src/demo.ts",
-    "demo:kit": "tsx src/demo.ts kit"
+    "demo:kit": "tsx src/demo.ts kit",
+    "demo:tw": "tsx src/demo.ts tw"
   },
   "dependencies": {
+    "@makeitbeauty/twc": "workspace:*",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "satori": "^0.29.0"
