@@ -46,6 +46,11 @@ export interface NodeBase {
   opacity?: number;
   rotation?: number;
   animation?: DesignAnimation;
+  /**
+   * Tailwind-subset utility string compiled by @makeitbeauty/twc (§5.6).
+   * Compiles first; explicit structured style fields override it.
+   */
+  tw?: string;
 }
 
 export type TextAlign = "left" | "center" | "right";
@@ -101,6 +106,8 @@ export interface DesignCanvasSpec {
   height: number;
   background?: string;
   radius?: number;
+  /** Canvas-level tw string (§5.6) — same semantics as NodeBase.tw. */
+  tw?: string;
 }
 
 export interface DesignDoc {

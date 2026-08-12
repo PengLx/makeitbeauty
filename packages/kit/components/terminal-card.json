@@ -1,0 +1,92 @@
+{
+  "id": "terminal-card",
+  "title": "Terminal card",
+  "description": "Terminal-style card: near-black window with three traffic-light dots, a prompt line, an output line, and a blinking block cursor on the next prompt. Chrome is fixed tw (static per definition, v1 constraint); the prompt/cursor accent is a prop routed through structured style fields, which ARE template-resolved. No mono font is loaded (Inter only), so the mono feel comes from tracking.",
+  "frame": { "w": 560, "h": 180 },
+  "props": {
+    "line1": {
+      "type": "string",
+      "description": "The command after the first prompt.",
+      "default": "npx makeitbeauty render readme.json"
+    },
+    "line2": {
+      "type": "string",
+      "description": "The output line under the command.",
+      "default": "✓ wrote card.svg — 24kb, 0 warnings"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Prompt and cursor color.",
+      "default": "#7ee787"
+    }
+  },
+  "nodes": [
+    {
+      "id": "window",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 560, "h": 180,
+      "tw": "bg-[#010409] border border-[#30363d] rounded-xl shadow-2xl"
+    },
+    {
+      "id": "dot-close",
+      "type": "rect",
+      "x": 20, "y": 16, "w": 12, "h": 12,
+      "tw": "bg-[#ff5f57] rounded-full"
+    },
+    {
+      "id": "dot-min",
+      "type": "rect",
+      "x": 40, "y": 16, "w": 12, "h": 12,
+      "tw": "bg-[#febc2e] rounded-full"
+    },
+    {
+      "id": "dot-max",
+      "type": "rect",
+      "x": 60, "y": 16, "w": 12, "h": 12,
+      "tw": "bg-[#28c840] rounded-full"
+    },
+    {
+      "id": "prompt1",
+      "type": "text",
+      "x": 20, "y": 54, "w": 16, "h": 20,
+      "text": "$",
+      "tw": "font-bold tracking-wide",
+      "style": { "fontSize": 14, "color": "{{props.accent}}" },
+      "animation": { "preset": "slideUp", "durationMs": 500 }
+    },
+    {
+      "id": "line1",
+      "type": "text",
+      "x": 40, "y": 54, "w": 500, "h": 20,
+      "text": "{{props.line1}}",
+      "tw": "text-[#e6edf3] font-medium tracking-wide",
+      "style": { "fontSize": 14 },
+      "animation": { "preset": "slideUp", "durationMs": 500 }
+    },
+    {
+      "id": "line2",
+      "type": "text",
+      "x": 20, "y": 84, "w": 520, "h": 20,
+      "text": "{{props.line2}}",
+      "tw": "text-[#7d8590] font-medium tracking-wide",
+      "style": { "fontSize": 14 },
+      "animation": { "preset": "slideUp", "durationMs": 500, "delayMs": 200 }
+    },
+    {
+      "id": "prompt2",
+      "type": "text",
+      "x": 20, "y": 116, "w": 16, "h": 20,
+      "text": "$",
+      "tw": "font-bold tracking-wide",
+      "style": { "fontSize": 14, "color": "{{props.accent}}" },
+      "animation": { "preset": "fadeIn", "durationMs": 400, "delayMs": 400 }
+    },
+    {
+      "id": "cursor",
+      "type": "rect",
+      "x": 40, "y": 118, "w": 9, "h": 16,
+      "style": { "fill": "{{props.accent}}", "radius": 2 },
+      "animation": { "preset": "blink", "durationMs": 1000, "delayMs": 500, "loop": true }
+    }
+  ]
+}

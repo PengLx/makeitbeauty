@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
 import type { ConnectorInfo } from "@/lib/api";
 import { BindingControl, FieldSelect, type BindingKind } from "@/components/BindingControl";
+import { TwField } from "@/components/TwField";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -147,6 +148,19 @@ export function Inspector({
         patch={patch}
       />
       <Separator />
+      {/* §5.6 tw on every node type. Keyed by node id so the debounced local
+          draft resets on selection change instead of leaking across nodes. */}
+      <TwField
+        key={node.id}
+        value={node.tw ?? ""}
+        onCommit={(tw) => patch({ tw })}
+        note={
+          node.type === "instance"
+            ? "The renderer ignores tw on instances in v0 — style the component's own nodes instead."
+            : undefined
+        }
+      />
+      <Separator />
       <AnimationSection node={node} patch={patch} />
     </div>
   );
@@ -204,6 +218,12 @@ function CanvasPanel({
               onCommit={(v) =>
                 onPatchCanvas({ radius: v > 0 ? Math.round(v) : undefined })
               }
+            />
+            {/* Canvas-level tw (§5.6). Editor only: a Studio FRAME has no tw
+                in kit-component.schema.json — style the fragment nodes there. */}
+            <TwField
+              value={canvas.tw ?? ""}
+              onCommit={(tw) => onPatchCanvas({ tw })}
             />
           </>
         )}

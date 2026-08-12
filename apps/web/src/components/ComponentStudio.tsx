@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Copy, RefreshCw, Save, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Info, RefreshCw, Save, Upload, X } from "lucide-react";
 import { PropsPanel } from "./PropsPanel";
 import { DesignCanvas } from "./DesignCanvas";
 import { CanvasToolbar } from "./CanvasToolbar";
@@ -55,6 +55,21 @@ interface Props {
   /** "{owner}/{name}" — one of my components. */
   componentId: string;
   onBack: () => void;
+}
+
+/** localStorage flag for the one-time Studio intro strip ("mib.*" idiom). */
+const STUDIO_INTRO_KEY = "mib.studioIntro";
+
+/** README anchor for the intro strip's "Learn more". */
+const LEARN_MORE_URL =
+  "https://github.com/PengLx/makeitbeauty#how-it-works--the-three-plane-model";
+
+function loadIntroDismissed(): boolean {
+  try {
+    return localStorage.getItem(STUDIO_INTRO_KEY) === "dismissed";
+  } catch {
+    return false; // storage unavailable → show; dismissing just won't stick
+  }
 }
 
 /**
@@ -116,6 +131,17 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
 
   // Snap preferences (persisted to "mib.snap", shared with the Editor).
   const [snap, setSnap] = useSnapSettings();
+
+  // One-time onboarding strip; dismissal persists across sessions.
+  const [introDismissed, setIntroDismissed] = useState(loadIntroDismissed);
+  function dismissIntro() {
+    setIntroDismissed(true);
+    try {
+      localStorage.setItem(STUDIO_INTRO_KEY, "dismissed");
+    } catch {
+      /* storage unavailable — dismiss for this session only */
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -415,6 +441,38 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
           <SessionControls me={me} />
         </div>
       </header>
+
+      {!introDismissed && (
+        <div className="flex shrink-0 items-center gap-3 border-b bg-sky-500/5 px-4 py-2 text-xs text-muted-foreground">
+          <Info className="size-3.5 shrink-0 text-sky-400" aria-hidden />
+          <p className="min-w-0 flex-1 leading-relaxed">
+            <strong className="font-medium text-foreground">Props</strong> are
+            the component's inputs — declare them on the left · use{" "}
+            <code className="rounded bg-secondary px-1 font-mono text-[11px]">
+              {"{{props.x}}"}
+            </code>{" "}
+            in text and values to fill slots ·{" "}
+            <strong className="font-medium text-foreground">Publish</strong>{" "}
+            freezes an immutable version designs can pin.{" "}
+            <a
+              href={LEARN_MORE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sky-400 underline underline-offset-2 transition-colors hover:text-sky-300"
+            >
+              Learn more
+            </a>
+          </p>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Dismiss Studio intro"
+            onClick={dismissIntro}
+          >
+            <X />
+          </Button>
+        </div>
+      )}
 
       {saveError && (
         <div className="border-b bg-card px-4 py-2">

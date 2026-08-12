@@ -80,6 +80,31 @@ Slots may appear anywhere the design schema accepts a string: text content
 and colors. Numeric geometry cannot hold a template (the schema types those
 fields as numbers), so v0 adds one restricted, declarative mechanism:
 
+### `tw` in components — static per definition
+
+Fragment nodes may carry a `tw` utility string (compiled by
+[`packages/twc`](../twc), architecture.md §5.6) — that is what powers the
+gradient/glass/shadow chrome of `gradient-banner`, `glow-stat` and
+`terminal-card`. One deliberate v1 constraint:
+
+- **`tw` strings are static per definition — templates are not supported
+  inside `tw`.** The pipeline's template step
+  (`apps/renderer/src/template.ts`) resolves `{{…}}` only in text content and
+  instance props; a `{{props.*}}` placeholder inside a plain node's `tw`
+  reaches the compiler literally and is dropped as an unknown class (with a
+  warning). Do not parameterize gradients or tw colors via props — bake them
+  in. (Kit expansion happens to deep-resolve fragment strings, so a template
+  in a *fragment's* `tw` would mechanically resolve today, but that is an
+  implementation detail, not a contract: the editor lints/previews `tw`
+  statically, and plain design nodes never get it. Components must not rely
+  on it.)
+- When a color **must** be prop-driven, route it through the structured
+  `style` fields (`style.color`, `style.fill`, `style.stroke`), which *are*
+  template-resolved and override `tw` in the §5.6 merge order — see
+  `terminal-card`'s prompt/cursor accent, or `stat-card`'s `accent`.
+- `tw` on an **instance node itself** is not supported yet (the pipeline
+  warns and ignores it); `tw` inside a component's fragment nodes is fine.
+
 ### Computed geometry (`computed`)
 
 A component may declare linear mappings from a numeric prop to a node's
@@ -159,8 +184,16 @@ of motion get the final, static frame.
 | `kit/stat-trio` | [components/stat-trio.json](components/stat-trio.json) | 720×110 | Three stat cells, each `slideUp` with 0/120/240ms stagger |
 | `kit/quote-banner` | [components/quote-banner.json](components/quote-banner.json) | 720×90 | Quote with accent quotation mark and a `growX` underline bar |
 | `kit/accent-divider` | [components/accent-divider.json](components/accent-divider.json) | 720×24 | Thin accent rule (`growX`) ending in a looping `blink` cursor square |
+| `kit/gradient-banner` | [components/gradient-banner.json](components/gradient-banner.json) | 720×140 | tw showcase: full-bleed indigo→purple→slate gradient banner, kicker/title/subtitle slots, cyan→fuchsia `growX` rule |
+| `kit/glow-stat` | [components/glow-stat.json](components/glow-stat.json) | 280×140 | tw showcase: glassy card (rgba bg + border + arbitrary glow shadow) with a big number and gradient underline |
+| `kit/terminal-card` | [components/terminal-card.json](components/terminal-card.json) | 560×180 | tw showcase: terminal window with traffic-light dots, two prompt lines and a looping `blink` block cursor |
 
 All components use the GitHub-dark palette (`#0d1117` / `#161b22` / `#21262d`
 / `#30363d` / `#58a6ff` / `#e6edf3` / `#7d8590`) with consistent radii
 (12 card / 4 bar) and 16–20px padding, so they compose cleanly on a
-`#0d1117` canvas.
+`#0d1117` canvas. The three tw showcase components layer the Tailwind-subset
+chrome (gradients, glass, glow shadows) on top of that same palette — their
+`tw` strings are fixed by design (see “`tw` in components” above), and the
+only mono-ish styling is `tracking`: the renderer currently loads **Inter
+only** (`apps/renderer/fonts/`), so no component may reference a monospace
+`fontFamily` until one ships.

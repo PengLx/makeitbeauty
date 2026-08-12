@@ -2,8 +2,15 @@ import { useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { Blocks, Plus, RefreshCw } from "lucide-react";
 import { toApiError, type ApiError, type Me } from "@/lib/api";
-import { createComponent } from "@/lib/api";
-import { COMPONENT_NAME_RE } from "@/lib/component";
+import { createComponent, updateComponent } from "@/lib/api";
+import { COMPONENT_NAME_RE, splitComponentId } from "@/lib/component";
+import {
+  COMPONENT_TEMPLATES,
+  seedDefinition,
+  type ComponentTemplate,
+} from "@/lib/componentTemplates";
+import { twApproxStyle } from "@/lib/tw";
+import { cn } from "@/lib/utils";
 import { useMyComponents } from "@/hooks/useMyComponents";
 import { timeAgo } from "@/lib/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -66,8 +73,17 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
   const [title, setTitle] = useState("");
   const [frameW, setFrameW] = useState(400);
   const [frameH, setFrameH] = useState(160);
+  const [templateId, setTemplateId] =
+    useState<ComponentTemplate["id"]>("blank");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<ApiError | null>(null);
+
+  const template =
+    COMPONENT_TEMPLATES.find((t) => t.id === templateId) ??
+    COMPONENT_TEMPLATES[0];
+  // Non-blank templates lay their nodes out for a specific frame, so the
+  // frame inputs lock to it (still resizable later in the Studio).
+  const frameLocked = template.seed != null;
 
   const nameValid = COMPONENT_NAME_RE.test(name);
   const frameValid =
@@ -79,8 +95,18 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
     setTitle("");
     setFrameW(400);
     setFrameH(160);
+    setTemplateId("blank");
     setCreateError(null);
     setCreateOpen(true);
+  }
+
+  /** Pick a starter: adopt its frame; prefill ONLY empty name/title fields. */
+  function selectTemplate(t: ComponentTemplate) {
+    setTemplateId(t.id);
+    setFrameW(t.frame.w);
+    setFrameH(t.frame.h);
+    if (t.suggestedName && name === "") setName(t.suggestedName);
+    if (t.seed && title === "") setTitle(t.label);
   }
 
   async function handleCreate(e: FormEvent) {
@@ -94,6 +120,21 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
         title: title.trim(),
         frame: { w: frameW, h: frameH },
       });
+      // Seed a non-blank starter into the fresh draft via the normal draft
+      // PUT. Failure here is non-fatal by design: the component already
+      // exists, so surfacing an error would strand the dialog on a name
+      // that can no longer be re-created — open the (blank) draft instead.
+      const seeded = seedDefinition(template, record.id, title.trim());
+      if (seeded) {
+        const target = splitComponentId(record.id);
+        if (target) {
+          try {
+            await updateComponent(target.owner, target.name, seeded);
+          } catch {
+            /* open blank */
+          }
+        }
+      }
       onOpen(record.id);
     } catch (err) {
       setCreateError(toApiError(err));
@@ -230,6 +271,45 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="space-y-2">
+              <Label id="start-from-label">Start from</Label>
+              {/* Radio cards: first-time creators open something beautiful
+                  (tw gradients, prop slots, an animation) instead of an
+                  empty frame. Swatches are painted by the same compiler
+                  the renderer uses, so they preview honestly. */}
+              <div
+                role="radiogroup"
+                aria-labelledby="start-from-label"
+                className="grid grid-cols-2 gap-2"
+              >
+                {COMPONENT_TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={templateId === t.id}
+                    onClick={() => selectTemplate(t)}
+                    className={cn(
+                      "rounded-lg border p-2 text-left transition-colors hover:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                      templateId === t.id && "border-sky-500 ring-1 ring-sky-500",
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "mb-1.5 block h-7 rounded-md",
+                        t.swatchTw === "" && "border border-dashed",
+                      )}
+                      style={twApproxStyle(t.swatchTw)}
+                    />
+                    <span className="block text-xs font-medium">{t.label}</span>
+                    <span className="block text-[11px] leading-snug text-muted-foreground">
+                      {t.blurb}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="new-component-name">Name</Label>
               <Input
                 id="new-component-name"
@@ -268,6 +348,7 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
                   min={1}
                   max={4096}
                   value={frameW}
+                  disabled={frameLocked}
                   onChange={(e) => setFrameW(Math.round(Number(e.target.value)))}
                 />
               </div>
@@ -279,10 +360,17 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
                   min={1}
                   max={4096}
                   value={frameH}
+                  disabled={frameLocked}
                   onChange={(e) => setFrameH(Math.round(Number(e.target.value)))}
                 />
               </div>
             </div>
+            {frameLocked && (
+              <p className="text-[11px] text-muted-foreground">
+                Sized by the “{template.label}” starter — resize later by
+                dragging the frame's edge in the Studio.
+              </p>
+            )}
 
             {createError && (
               <Alert variant="destructive">

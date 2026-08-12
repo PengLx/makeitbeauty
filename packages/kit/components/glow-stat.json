@@ -1,0 +1,65 @@
+{
+  "id": "glow-stat",
+  "title": "Glow stat",
+  "description": "Glassy stat card — translucent panel with a cyan glow shadow, one headline number, an uppercase label, and a cyan→fuchsia underline that grows out. The glass + glow chrome is fixed tw (static per definition, v1 constraint); the slots are text-only.",
+  "frame": { "w": 280, "h": 140 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small uppercase heading above the value.",
+      "default": "TOTAL STARS"
+    },
+    "value": {
+      "type": "string",
+      "description": "The headline metric. Bind it, e.g. {{github.stats.totalStars}}.",
+      "default": "2,048"
+    },
+    "caption": {
+      "type": "string",
+      "description": "Context line under the underline (trend, unit, period).",
+      "default": "+18% this month"
+    }
+  },
+  "nodes": [
+    {
+      "id": "card",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 280, "h": 140,
+      "tw": "bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.14)] rounded-2xl shadow-[0_0_28px_rgba(0,211,242,0.25),0_25px_50px_-12px_rgba(0,0,0,0.45)]"
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 18, "w": 240, "h": 14,
+      "text": "{{props.label}}",
+      "tw": "text-slate-400 font-semibold tracking-widest",
+      "style": { "fontSize": 11 },
+      "animation": { "preset": "fadeIn", "durationMs": 600 }
+    },
+    {
+      "id": "value",
+      "type": "text",
+      "x": 20, "y": 38, "w": 240, "h": 48,
+      "text": "{{props.value}}",
+      "tw": "text-white font-extrabold tracking-tight",
+      "style": { "fontSize": 38 },
+      "animation": { "preset": "fadeIn", "durationMs": 700, "delayMs": 120 }
+    },
+    {
+      "id": "underline",
+      "type": "rect",
+      "x": 20, "y": 96, "w": 110, "h": 5,
+      "tw": "bg-gradient-to-r from-cyan-400 to-fuchsia-500 rounded-full",
+      "animation": { "preset": "growX", "durationMs": 800, "delayMs": 260 }
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "x": 20, "y": 110, "w": 240, "h": 16,
+      "text": "{{props.caption}}",
+      "tw": "text-cyan-300 font-medium tracking-wide",
+      "style": { "fontSize": 12 },
+      "animation": { "preset": "fadeIn", "durationMs": 600, "delayMs": 400 }
+    }
+  ]
+}

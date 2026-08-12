@@ -22,6 +22,7 @@ import {
   type SnapTargets,
 } from "@/lib/snapping";
 import type { KitComponent } from "@/hooks/useKit";
+import { layerStyles, twApproxStyle } from "@/lib/tw";
 import { cn } from "@/lib/utils";
 
 interface DragState {
@@ -318,8 +319,14 @@ export function DesignCanvas({
         style={{
           width: design.canvas.width,
           height: design.canvas.height,
-          background: design.canvas.background ?? "transparent",
-          borderRadius: design.canvas.radius ?? 0,
+          // Canvas tw approximation, merged UNDER the structured fields —
+          // the renderer's §5.6 order (tree.ts buildCanvas: tw first, then
+          // background/radius). The API-rendered preview stays the truth;
+          // this only lets gradients/radii show up live while editing.
+          ...layerStyles(twApproxStyle(design.canvas.tw), {
+            backgroundColor: design.canvas.background,
+            borderRadius: design.canvas.radius,
+          }),
         }}
       >
         {snap.grid && (
@@ -517,7 +524,12 @@ function NodeBody({ node, kitById }: { node: DesignNode; kitById: Map<string, Ki
           alt=""
           draggable={false}
           className="pointer-events-none h-full w-full"
-          style={{ objectFit: node.fit ?? "cover", borderRadius: node.radius ?? 0 }}
+          // tw under structured (tree.ts imageEl) — e.g. rounded-full applies
+          // unless an explicit structured radius overrides it.
+          style={layerStyles(twApproxStyle(node.tw), {
+            objectFit: node.fit ?? "cover",
+            borderRadius: node.radius,
+          })}
         />
       );
     case "instance":
@@ -525,23 +537,36 @@ function NodeBody({ node, kitById }: { node: DesignNode; kitById: Map<string, Ki
   }
 }
 
+// Node tw approximation (§5.6): each body compiles node.tw and layers it
+// UNDER the structured style mapping — defaults < tw < structured, exactly
+// the renderer's merge order (apps/renderer/src/tree.ts) so gradients, radii
+// and shadows show up live while the Inspector's structured edits still win.
+// The API-rendered preview stays the truth; this is only an approximation.
+
 function TextBody({ node }: { node: TextNode }) {
   const s = node.style ?? {};
   const align = s.align ?? "left";
   return (
     <div
       className="flex h-full w-full"
-      style={{
-        justifyContent: align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start",
-        textAlign: align,
-        fontFamily: s.fontFamily ?? "Inter, sans-serif",
-        fontSize: s.fontSize ?? 16,
-        fontWeight: s.fontWeight ?? 400,
-        // Renderer default is #000000 (tree.ts); mirror it so WYSIWYG holds.
-        color: s.color ?? "#000000",
-        lineHeight: s.lineHeight,
-        letterSpacing: s.letterSpacing !== undefined ? `${s.letterSpacing}px` : undefined,
-      }}
+      style={layerStyles(
+        {
+          justifyContent: align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start",
+          textAlign: align,
+          fontFamily: s.fontFamily ?? "Inter, sans-serif",
+          fontSize: s.fontSize ?? 16,
+          fontWeight: 400,
+          // Renderer default is #000000 (tree.ts); mirror it so WYSIWYG holds.
+          color: "#000000",
+        },
+        twApproxStyle(node.tw),
+        {
+          fontWeight: s.fontWeight,
+          color: s.color,
+          lineHeight: s.lineHeight,
+          letterSpacing: s.letterSpacing !== undefined ? `${s.letterSpacing}px` : undefined,
+        },
+      )}
     >
       {node.text}
     </div>
@@ -553,16 +578,32 @@ function RectBody({ node }: { node: RectNode }) {
   return (
     <div
       className="h-full w-full"
-      style={{
-        backgroundColor: s.fill ?? "transparent",
-        borderRadius: s.radius ?? 0,
-        border: s.stroke && s.strokeWidth ? `${s.strokeWidth}px solid ${s.stroke}` : undefined,
-      }}
+      style={layerStyles(
+        twApproxStyle(node.tw),
+        {
+          backgroundColor: s.fill,
+          borderRadius: s.radius,
+          // Longhands, matching tree.ts rectEl, so a structured stroke
+          // deterministically overrides tw border classes.
+          ...(s.stroke && s.strokeWidth
+            ? {
+                borderWidth: `${s.strokeWidth}px`,
+                borderStyle: "solid" as const,
+                borderColor: s.stroke,
+              }
+            : undefined),
+        },
+      )}
     />
   );
 }
 
-/** Instances show title + frame outline; the true expansion renders in the preview panel. */
+/**
+ * Instances show title + frame outline; the true expansion renders in the
+ * preview panel. Deliberately NO tw approximation here: the renderer ignores
+ * tw on instance nodes in v0 (tree.ts instanceEl — it warns instead), so
+ * painting it on the canvas would preview an effect production never shows.
+ */
 function InstanceBody({ node, kitById }: { node: InstanceNode; kitById: Map<string, KitComponent> }) {
   const kit = kitById.get(node.component);
   return (
