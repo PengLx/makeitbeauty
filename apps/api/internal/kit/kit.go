@@ -23,6 +23,12 @@ import (
 // validation in httpapi so kit and registry categories can never drift.
 var CategoryPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 
+// connectorSlugPattern constrains the optional dataConnector slug of a
+// native component ("github", "wakatime", ...). Slug-shaped like categories,
+// but a distinct pattern: connector naming must never drift with the palette
+// taxonomy.
+var connectorSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
+
 // Frame is the design-time bounding box of a component.
 type Frame struct {
 	W float64 `json:"w"`
@@ -49,10 +55,16 @@ type Component struct {
 	// generator in the renderer from (props, data, frame) — official kit
 	// only. /v1/kit passes it through so the editor can label natives.
 	Native bool `json:"native,omitempty"`
+	// DataConnector is the connector whose snapshot a native component's
+	// DataFields address (a slug like "wakatime"). Optional: absent means
+	// github — the original native set predates multi-connector natives, so
+	// derivation defaults it rather than requiring every file to say so.
+	// /v1/kit passes it through verbatim (omitted when the file omits it).
+	DataConnector string `json:"dataConnector,omitempty"`
 	// DataFields are the connector snapshot paths a native component
 	// consumes directly (e.g. "stats.calendar"). Binding derivation unions
-	// them into the design's github binding for every instance of the
-	// component (v0: natives are fixed to the github connector).
+	// them into the design's binding for the component's DataConnector for
+	// every instance of the component.
 	DataFields []string `json:"dataFields,omitempty"`
 	// Nodes is the component's definition body: its design-schema fragment
 	// node array, passed through verbatim (the API never interprets nodes).
@@ -143,16 +155,17 @@ func parseFile(path string) (Component, error) {
 		return Component{}, err
 	}
 	var raw struct {
-		ID          string          `json:"id"`
-		Title       string          `json:"title"`
-		Description string          `json:"description"`
-		Category    string          `json:"category"`
-		Frame       Frame           `json:"frame"`
-		Props       json.RawMessage `json:"props"`
-		Native      bool            `json:"native"`
-		DataFields  []string        `json:"dataFields"`
-		Nodes       json.RawMessage `json:"nodes"`
-		Computed    json.RawMessage `json:"computed"`
+		ID            string          `json:"id"`
+		Title         string          `json:"title"`
+		Description   string          `json:"description"`
+		Category      string          `json:"category"`
+		Frame         Frame           `json:"frame"`
+		Props         json.RawMessage `json:"props"`
+		Native        bool            `json:"native"`
+		DataConnector string          `json:"dataConnector"`
+		DataFields    []string        `json:"dataFields"`
+		Nodes         json.RawMessage `json:"nodes"`
+		Computed      json.RawMessage `json:"computed"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return Component{}, fmt.Errorf("invalid JSON: %w", err)
@@ -180,6 +193,15 @@ func parseFile(path string) (Component, error) {
 	if !raw.Native && len(raw.DataFields) > 0 {
 		return Component{}, fmt.Errorf("dataFields requires native: true")
 	}
+	// dataConnector qualifies dataFields, so it is native-only too; when
+	// present it must be a connector slug (absent means github — binding
+	// derivation applies the default).
+	if raw.DataConnector != "" && !raw.Native {
+		return Component{}, fmt.Errorf("dataConnector requires native: true")
+	}
+	if raw.DataConnector != "" && !connectorSlugPattern.MatchString(raw.DataConnector) {
+		return Component{}, fmt.Errorf("dataConnector %q must match %s", raw.DataConnector, connectorSlugPattern)
+	}
 	props := raw.Props
 	if len(props) == 0 {
 		props = json.RawMessage("{}") // a component may declare no props
@@ -193,16 +215,17 @@ func parseFile(path string) (Component, error) {
 		return Component{}, err
 	}
 	return Component{
-		ID:          "kit/" + raw.ID,
-		Title:       raw.Title,
-		Description: raw.Description,
-		Category:    raw.Category,
-		Frame:       raw.Frame,
-		Props:       props,
-		Native:      raw.Native,
-		DataFields:  raw.DataFields,
-		Nodes:       nodes,
-		Computed:    computed,
+		ID:            "kit/" + raw.ID,
+		Title:         raw.Title,
+		Description:   raw.Description,
+		Category:      raw.Category,
+		Frame:         raw.Frame,
+		Props:         props,
+		Native:        raw.Native,
+		DataConnector: raw.DataConnector,
+		DataFields:    raw.DataFields,
+		Nodes:         nodes,
+		Computed:      computed,
 	}, nil
 }
 

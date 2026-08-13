@@ -1,0 +1,91 @@
+{
+  "id": "coding-activity",
+  "title": "Coding activity",
+  "category": "data",
+  "description": "The last 7 days of WakaTime coding time as daily bars with a staggered growY entrance and a weekly-hours headline. Native component — the renderer generates the bars from the wakatime connector's stats.days; the nodes below are the static palette preview.",
+  "native": true,
+  "dataConnector": "wakatime",
+  "dataFields": ["stats.days", "stats.weeklyHours"],
+  "frame": { "w": 360, "h": 110 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the bars.",
+      "default": "CODING ACTIVITY"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Bar color for days with activity.",
+      "default": "#3fb950"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 360, "h": 110,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 16, "y": 12, "w": 180, "h": 15,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 11, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "hours",
+      "type": "text",
+      "x": 204, "y": 12, "w": 140, "h": 15,
+      "text": "32.5h this week",
+      "style": { "fontSize": 11, "fontWeight": 600, "color": "#e6edf3", "align": "right" }
+    },
+    {
+      "id": "pv0",
+      "type": "rect",
+      "x": 16, "y": 62, "w": 40, "h": 34,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv1",
+      "type": "rect",
+      "x": 64, "y": 80, "w": 40, "h": 16,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv2",
+      "type": "rect",
+      "x": 112, "y": 86, "w": 40, "h": 10,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv3",
+      "type": "rect",
+      "x": 160, "y": 56, "w": 40, "h": 40,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv4",
+      "type": "rect",
+      "x": 208, "y": 64, "w": 40, "h": 32,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv5",
+      "type": "rect",
+      "x": 256, "y": 60, "w": 40, "h": 36,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    },
+    {
+      "id": "pv6",
+      "type": "rect",
+      "x": 304, "y": 52, "w": 40, "h": 44,
+      "style": { "fill": "{{props.accent}}", "radius": 2 }
+    }
+  ]
+}

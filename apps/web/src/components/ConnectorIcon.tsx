@@ -1,4 +1,4 @@
-import { Braces, Plug } from "lucide-react";
+import { Braces, Code2, Plug, Rss, Timer } from "lucide-react";
 
 /** GitHub mark — lucide dropped brand icons, so it's inlined (sized like one). */
 export function GitHubMark(props: React.SVGProps<SVGSVGElement>) {
@@ -25,6 +25,14 @@ export function ConnectorIcon({
   switch (connector) {
     case "github":
       return <GitHubMark className={className} />;
+    // Lucide carries no brand marks, so the config-tier connectors get
+    // evocative stand-ins: coding time, code puzzles, a literal RSS icon.
+    case "wakatime":
+      return <Timer className={className} aria-hidden="true" />;
+    case "leetcode":
+      return <Code2 className={className} aria-hidden="true" />;
+    case "rss":
+      return <Rss className={className} aria-hidden="true" />;
     // The Component Studio's synthetic "props" source (its pickers list the
     // component's declared props instead of connector fields — §7.5).
     case "props":

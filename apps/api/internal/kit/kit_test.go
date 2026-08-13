@@ -234,6 +234,60 @@ func TestLoadParsesNativeDataFields(t *testing.T) {
 	}
 }
 
+// The optional dataConnector slug qualifies a native's dataFields with the
+// connector they address; absent stays absent (binding derivation defaults
+// it to github), and the value passes through verbatim for /v1/kit.
+func TestLoadParsesDataConnector(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"wakatime-days.json": `{
+			"id": "wakatime-days", "title": "WakaTime days",
+			"native": true, "dataConnector": "wakatime", "dataFields": ["stats.days"],
+			"frame": {"w": 720, "h": 120}
+		}`,
+		"heatmap.json": validHeatmap, // native, no dataConnector
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 2 {
+		t.Fatalf("got %d components, want 2", len(components))
+	}
+	heatmap, days := components[0], components[1]
+	if days.ID != "kit/wakatime-days" || days.DataConnector != "wakatime" {
+		t.Errorf("wakatime-days = %s / dataConnector %q, want kit/wakatime-days / wakatime", days.ID, days.DataConnector)
+	}
+	// Absent stays absent: the github default is derivation's job, so files
+	// that predate the qualifier keep their exact serialized shape.
+	if heatmap.DataConnector != "" {
+		t.Errorf("heatmap.DataConnector = %q, want empty (defaulting happens at derivation)", heatmap.DataConnector)
+	}
+}
+
+// dataConnector qualifies dataFields, so it is invalid on declarative
+// components and must be a slug; bad files are malformed and skipped.
+func TestLoadRejectsBadDataConnector(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"declarative-with-connector.json": `{
+			"id": "a", "title": "A", "dataConnector": "wakatime",
+			"frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]
+		}`,
+		"bad-slug.json": `{
+			"id": "b", "title": "B", "native": true,
+			"dataConnector": "Waka Time", "dataFields": ["stats.days"],
+			"frame": {"w": 10, "h": 10}
+		}`,
+		"good.json": validHeatmap,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 || components[0].ID != "kit/contribution-heatmap" {
+		t.Fatalf("components = %+v, want only kit/contribution-heatmap", components)
+	}
+}
+
 // native and dataFields imply each other (kit-component.schema.json
 // dependentRequired); half-declared files are malformed and skipped.
 func TestLoadRejectsHalfNativeComponents(t *testing.T) {

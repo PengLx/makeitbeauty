@@ -27,7 +27,11 @@
  * Natives auto-consume connector data via their metadata dataFields (e.g.
  * "stats.calendar") — no {{templates}} involved, so the API's binding
  * derivation unions dataFields into the design's connector bindings to keep
- * the consent record complete.
+ * the consent record complete. Which connector: the metadata's dataConnector
+ * (default github). Expansion hands each generator exactly that connector's
+ * snapshot subtree (connectorSubtree below), so generators think in
+ * connector-relative paths ("stats.days", never "wakatime.stats.days") and a
+ * snapshot without that connector degrades to the generator's empty state.
  */
 import { lookupPath } from "./template.js";
 import type { RectNode, TextNode } from "./types.js";
@@ -38,7 +42,12 @@ export type NativeFragmentNode = TextNode | RectNode;
 /** Instance props after mergeProps: declared defaults overlaid by the design. */
 export type ResolvedProps = Record<string, string | number>;
 
-/** The connector data snapshot passed to render (namespaced by connector). */
+/**
+ * What a generator receives as `data`: ONE connector's snapshot subtree
+ * (expansion resolves data[dataConnector] via connectorSubtree). The full
+ * render snapshot — namespaced by connector — has the same shape, which is
+ * what connectorSubtree takes apart.
+ */
 export type DataSnapshot = Record<string, unknown>;
 
 export interface NativeGeneratorArgs {
@@ -60,11 +69,28 @@ const FG = "#e6edf3";
 const TRACK = "#21262d";
 
 /**
+ * The snapshot subtree a native component's generator receives: exactly
+ * data[connector], per the component's dataConnector metadata (default
+ * github). Anything that is not a plain object — the connector missing from
+ * the snapshot, filtered away by bindings, or malformed — becomes {} so the
+ * generator's dataField lookups find nothing and it renders its own
+ * empty state. Pure and copy-free: generators never mutate their input.
+ */
+export function connectorSubtree(data: DataSnapshot, connector: string): DataSnapshot {
+  const subtree = data[connector];
+  return subtree !== null && typeof subtree === "object" && !Array.isArray(subtree)
+    ? (subtree as DataSnapshot)
+    : {};
+}
+
+/**
  * Resolve a connector-relative dataField (e.g. "stats.calendar") against the
- * snapshot. Snapshots are namespaced by connector ({github: {stats: …}}), so
- * try the path as given first, then under each top-level namespace in sorted
- * order — deterministic, and connector-agnostic so a future connector serving
- * the same normalized shape lights the same component up.
+ * snapshot. Through expansion the snapshot is already the component's own
+ * connector subtree, so the direct path hits; the fallback — each top-level
+ * namespace in sorted order — keeps directly-invoked generators working
+ * against full namespaced snapshots ({github: {stats: …}}), deterministic
+ * and connector-agnostic so a source serving the same normalized shape
+ * lights the same component up.
  */
 export function dataField(data: DataSnapshot, field: string): unknown {
   const direct = lookupPath(data, field);
@@ -77,18 +103,20 @@ export function dataField(data: DataSnapshot, field: string): unknown {
 }
 
 /**
- * Coerce a calendar timeseries into daily counts, oldest → newest. Accepts
- * the normalized [{date, count}] shape and bare number arrays; anything
- * unusable in an entry counts as 0. Returns null when there is no series.
+ * Coerce a daily timeseries into per-entry values, oldest → newest. Accepts
+ * the normalized object shape ([{date, count}] with `key` naming the value
+ * field — "count" for calendars, "minutes" for WakaTime days) and bare
+ * number arrays; anything unusable in an entry counts as 0. Returns null
+ * when there is no series.
  */
-function toCounts(value: unknown): number[] | null {
+function toCounts(value: unknown, key = "count"): number[] | null {
   if (!Array.isArray(value) || value.length === 0) return null;
   return value.map((entry) => {
     const n =
       typeof entry === "number"
         ? entry
         : entry !== null && typeof entry === "object"
-          ? (entry as { count?: unknown }).count
+          ? (entry as Record<string, unknown>)[key]
           : undefined;
     const num = typeof n === "number" ? n : typeof n === "string" ? Number(n) : NaN;
     return Number.isFinite(num) && num > 0 ? Math.floor(num) : 0;
@@ -554,6 +582,318 @@ function streakFlame({ props, data, frame }: NativeGeneratorArgs): NativeFragmen
 }
 
 // ---------------------------------------------------------------------------
+// coding-activity — last 7 days of WakaTime coding minutes + weekly hours
+// (dataConnector: wakatime)
+// ---------------------------------------------------------------------------
+
+const CA_DAYS = 7;
+const CA_PAD = 16;
+const CA_TOP = 34; // bars start below the heading row
+const CA_BOTTOM = 14;
+const CA_GAP = 8;
+
+function codingActivity({ props, data, frame }: NativeGeneratorArgs): NativeFragmentNode[] {
+  const chrome: NativeFragmentNode[] = [
+    card(frame, String(props.background)),
+    heading(String(props.label), CA_PAD, 12, frame.w - 2 * CA_PAD, 11),
+  ];
+
+  const minutes = toCounts(dataField(data, "stats.days"), "minutes");
+  if (!minutes) return [...chrome, noData(frame, CA_TOP, "no coding data yet")];
+
+  // The last 7 entries are the week, newest last; a shorter series is
+  // front-padded with zeros so the newest day always lands in the rightmost
+  // bar (same convention as activity-sparkline).
+  const tail = minutes.slice(-CA_DAYS);
+  const days: number[] = new Array(CA_DAYS - tail.length).fill(0).concat(tail);
+  const max = days.reduce((a, b) => Math.max(a, b), 0);
+
+  // Bars fill the frame width exactly: barW = (w − 2·PAD − 6·GAP)/7
+  // (360 → (360 − 32 − 48)/7 = 40). Heights scale to the busiest day over
+  // areaH, floored at 2px whenever the day has any activity; idle days
+  // render a 2px track stub so the 7-day rhythm stays visible.
+  const baseline = frame.h - CA_BOTTOM;
+  const areaH = baseline - CA_TOP;
+  const barW = (frame.w - 2 * CA_PAD - (CA_DAYS - 1) * CA_GAP) / CA_DAYS;
+  const accent = String(props.accent);
+
+  const bars: NativeFragmentNode[] = days.map((m, i) => {
+    const h = max > 0 && m > 0 ? Math.max(2, Math.round((m * areaH) / max)) : 2;
+    return {
+      id: `bar${i}`,
+      type: "rect",
+      x: CA_PAD + i * (barW + CA_GAP),
+      y: baseline - h,
+      w: barW,
+      h,
+      style: { fill: m > 0 ? accent : TRACK, radius: 2 },
+      // Staggered entrance, 60ms per bar, oldest first. Stripped by
+      // expansion when the instance itself animates.
+      animation: { preset: "growY", durationMs: 600, delayMs: i * 60 },
+    };
+  });
+
+  // Weekly-hours headline, top-right, mirroring the heading row: the
+  // connector's 1dp scalar when present, else derived from the shown days
+  // (minutes/60 rounded to 1dp) — pure arithmetic, deterministic text.
+  const scalar = dataField(data, "stats.weeklyHours");
+  const num =
+    typeof scalar === "number" ? scalar : typeof scalar === "string" ? Number(scalar) : NaN;
+  const totalMinutes = days.reduce((a, b) => a + b, 0);
+  const hours =
+    Number.isFinite(num) && num >= 0
+      ? Math.round(num * 10) / 10
+      : Math.round((totalMinutes / 60) * 10) / 10;
+
+  return [
+    ...chrome,
+    ...bars,
+    {
+      id: "hours",
+      type: "text",
+      x: frame.w - CA_PAD - 140,
+      y: 12,
+      w: 140,
+      h: 15,
+      text: `${hours}h this week`,
+      style: { fontSize: 11, fontWeight: 600, color: FG, align: "right" },
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// leetcode-solved — total solved + easy/medium/hard difficulty bar
+// (dataConnector: leetcode)
+// ---------------------------------------------------------------------------
+
+/** LeetCode's difficulty palette (green/orange/red), adjusted to GitHub-dark. */
+export const LEETCODE_COLORS = {
+  easy: "#3fb950",
+  medium: "#ffa657",
+  hard: "#ff7b72",
+} as const;
+
+const LS_PAD = 20;
+const LS_TOTAL_Y = 30;
+const LS_BAR_Y = 76;
+const LS_BAR_H = 8;
+const LS_RADIUS = 4;
+const LS_COUNTS_Y = 94;
+
+function leetcodeSolved({ props, data, frame }: NativeGeneratorArgs): NativeFragmentNode[] {
+  const chrome: NativeFragmentNode[] = [
+    card(frame, String(props.background)),
+    heading(String(props.label), LS_PAD, 14, frame.w - 2 * LS_PAD, 12),
+  ];
+
+  const easy = toCount(dataField(data, "solved.easy"));
+  const medium = toCount(dataField(data, "solved.medium"));
+  const hard = toCount(dataField(data, "solved.hard"));
+  const declaredTotal = toCount(dataField(data, "solved.total"));
+  if (easy === null && medium === null && hard === null && declaredTotal === null) {
+    return [...chrome, noData(frame, 40, "no leetcode data yet")];
+  }
+
+  const segments = [
+    { name: "easy", value: easy ?? 0, color: LEETCODE_COLORS.easy },
+    { name: "medium", value: medium ?? 0, color: LEETCODE_COLORS.medium },
+    { name: "hard", value: hard ?? 0, color: LEETCODE_COLORS.hard },
+  ];
+  const sum = segments.reduce((a, s) => a + s.value, 0);
+  const total = declaredTotal ?? sum;
+
+  const barW = frame.w - 2 * LS_PAD;
+  const nodes: NativeFragmentNode[] = [
+    ...chrome,
+    // Total headline: the big number the card exists for. The connector's
+    // declared total wins; without it the difficulty sum stands in.
+    {
+      id: "total",
+      type: "text",
+      x: LS_PAD,
+      y: LS_TOTAL_Y,
+      w: barW,
+      h: 34,
+      text: String(total),
+      style: { fontSize: 28, fontWeight: 700, color: FG },
+    },
+    // Rounded track under the segments — the whole bar when nothing is
+    // solved yet, a sub-pixel-rounding backstop otherwise.
+    {
+      id: "track",
+      type: "rect",
+      x: LS_PAD,
+      y: LS_BAR_Y,
+      w: barW,
+      h: LS_BAR_H,
+      style: { fill: String(props.trackColor), radius: LS_RADIUS },
+    },
+  ];
+
+  // Proportional difficulty segments, zero-count difficulties skipped; the
+  // outer corners round via the same overlapping-cap trick as language-bar.
+  // Ids key by difficulty name (seg-easy…), never position, so they stay
+  // stable as counts move through zero.
+  const shown = segments.filter((s) => s.value > 0);
+  let x = LS_PAD;
+  shown.forEach((seg, i) => {
+    const w = (barW * seg.value) / sum;
+    const first = i === 0;
+    const last = i === shown.length - 1;
+    const rounded = first || last;
+    nodes.push({
+      id: `seg-${seg.name}`,
+      type: "rect",
+      x,
+      y: LS_BAR_Y,
+      w,
+      h: LS_BAR_H,
+      style: { fill: seg.color, radius: rounded ? LS_RADIUS : 0 },
+    });
+    if (rounded && shown.length > 1 && w > LS_RADIUS) {
+      // Square off the inner edge (right half of the first segment, left
+      // half of the last); a lone segment spans the whole track and keeps
+      // both rounded corners instead.
+      nodes.push({
+        id: `cap-${seg.name}`,
+        type: "rect",
+        x: first ? x + w / 2 : x,
+        y: LS_BAR_Y,
+        w: w / 2,
+        h: LS_BAR_H,
+        style: { fill: seg.color, radius: 0 },
+      });
+    }
+    x += w;
+  });
+
+  // Per-difficulty counts on fixed thirds — always all three, colored like
+  // their segments (a zero is information too).
+  const slotW = barW / segments.length;
+  segments.forEach((seg, i) => {
+    nodes.push({
+      id: `count-${seg.name}`,
+      type: "text",
+      x: LS_PAD + i * slotW,
+      y: LS_COUNTS_Y,
+      w: slotW - 4,
+      h: 15,
+      text: `${seg.value} ${seg.name}`,
+      style: { fontSize: 11, fontWeight: 600, color: seg.color },
+    });
+  });
+
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// blog-latest — feed title + the three most recent posts
+// (dataConnector: rss)
+// ---------------------------------------------------------------------------
+
+const BL_PAD = 20;
+const BL_ROWS = 3;
+const BL_ROW0_Y = 44;
+const BL_ROW_H = 32;
+const BL_DATE_W = 84; // right-aligned YYYY-MM-DD column
+const BL_TITLE_SIZE = 14;
+/** Rough glyph advance for the title width budget: ~0.62 × fontSize. */
+const BL_CHAR_W = 8.7;
+
+interface FeedPost {
+  title: string;
+  date: string | null;
+}
+
+/** Coerce the posts series ([{title, date}]); entries without a usable title drop. */
+function toPosts(value: unknown): FeedPost[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: FeedPost[] = [];
+  for (const entry of value) {
+    if (entry === null || typeof entry !== "object") continue;
+    const { title, date } = entry as Record<string, unknown>;
+    if (typeof title === "string" && title !== "") {
+      out.push({ title, date: typeof date === "string" && date !== "" ? date : null });
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Hard character-budget truncation with a trailing ellipsis; trailing
+ * whitespace before the ellipsis is trimmed so "word …" never renders.
+ */
+export function truncateTitle(title: string, maxChars: number): string {
+  if (title.length <= maxChars) return title;
+  return `${title.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
+}
+
+function blogLatest({ props, data, frame }: NativeGeneratorArgs): NativeFragmentNode[] {
+  // The small heading IS the feed title when the snapshot carries one; the
+  // label prop is the fallback so an unconfigured card still reads.
+  const feedTitle = dataField(data, "feed.title");
+  const title = typeof feedTitle === "string" && feedTitle !== "" ? feedTitle : String(props.label);
+  const chrome: NativeFragmentNode[] = [
+    card(frame, String(props.background)),
+    heading(title, BL_PAD, 14, frame.w - 2 * BL_PAD, 12),
+  ];
+
+  const posts = toPosts(dataField(data, "posts"));
+  if (!posts) return [...chrome, noData(frame, BL_ROW0_Y, "no posts yet")];
+
+  // Width budget per row: accent-dot column (14) + truncated title + 8px gap
+  // + right-aligned date column. 480-wide frame → 334px ≈ 38 characters.
+  const titleX = BL_PAD + 14;
+  const titleW = frame.w - titleX - BL_PAD - BL_DATE_W - 8;
+  const maxChars = Math.floor(titleW / BL_CHAR_W);
+  const accent = String(props.accent);
+
+  const nodes: NativeFragmentNode[] = [...chrome];
+  posts.slice(0, BL_ROWS).forEach((post, i) => {
+    const y = BL_ROW0_Y + i * BL_ROW_H;
+    // The whole row shares one staggered slideUp beat — dot, title and date
+    // enter together (fresh objects per node: expansion may delete them).
+    // Stripped by expansion when the instance itself animates.
+    const animation = { preset: "slideUp", durationMs: 500, delayMs: i * 90 } as const;
+    nodes.push({
+      id: `dot${i}`,
+      type: "rect",
+      x: BL_PAD,
+      y: y + 7,
+      w: 6,
+      h: 6,
+      style: { fill: accent, radius: 3 },
+      animation: { ...animation },
+    });
+    nodes.push({
+      id: `post${i}`,
+      type: "text",
+      x: titleX,
+      y,
+      w: titleW,
+      h: 20,
+      text: truncateTitle(post.title, maxChars),
+      style: { fontSize: BL_TITLE_SIZE, fontWeight: 500, color: FG },
+      animation: { ...animation },
+    });
+    if (post.date !== null) {
+      nodes.push({
+        id: `date${i}`,
+        type: "text",
+        x: frame.w - BL_PAD - BL_DATE_W,
+        y: y + 2,
+        w: BL_DATE_W,
+        h: 16,
+        text: post.date,
+        style: { fontSize: 12, fontWeight: 400, color: MUTED, align: "right" },
+        animation: { ...animation },
+      });
+    }
+  });
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -572,4 +912,7 @@ export const nativeGenerators: ReadonlyMap<string, NativeGenerator> = new Map<
   ["activity-sparkline", activitySparkline],
   ["language-bar", languageBar],
   ["streak-flame", streakFlame],
+  ["coding-activity", codingActivity],
+  ["leetcode-solved", leetcodeSolved],
+  ["blog-latest", blogLatest],
 ]);

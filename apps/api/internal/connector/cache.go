@@ -25,6 +25,7 @@ type SnapshotCache struct {
 	mu       sync.Mutex
 	entries  map[cacheKey]*cacheEntry
 	inflight map[cacheKey]struct{} // keys with a background refresh running
+	gen      map[cacheKey]uint64   // bumped by Invalidate; discards late writes
 }
 
 type cacheKey struct {
@@ -56,7 +57,21 @@ func NewSnapshotCache(registry *Registry, log *slog.Logger) *SnapshotCache {
 		fetchTimeout: 20 * time.Second,
 		entries:      map[cacheKey]*cacheEntry{},
 		inflight:     map[cacheKey]struct{}{},
+		gen:          map[cacheKey]uint64{},
 	}
+}
+
+// Invalidate drops the cached snapshot for (userID, connectorName) and bumps
+// the key's generation so any in-flight fetch that started under the old
+// account discards its result. Called when the account changes — connect,
+// reconfigure, disconnect — because what Fetch returns depends on the
+// account, and the old snapshot must not keep serving for up to a TTL.
+func (c *SnapshotCache) Invalidate(userID, connectorName string) {
+	key := cacheKey{userID: userID, connector: connectorName}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen[key]++
+	delete(c.entries, key)
 }
 
 // Snapshot returns the snapshot for (userID, connectorName), fetching on a
@@ -78,6 +93,7 @@ func (c *SnapshotCache) Snapshot(ctx context.Context, userID, connectorName stri
 		c.mu.Unlock()
 		return data, nil
 	}
+	gen := c.gen[key]
 	c.mu.Unlock()
 
 	// Cold miss: fetch synchronously — there is nothing stale to serve.
@@ -86,7 +102,7 @@ func (c *SnapshotCache) Snapshot(ctx context.Context, userID, connectorName stri
 	if err != nil {
 		return nil, fmt.Errorf("connector %q: fetch: %w", connectorName, err)
 	}
-	c.storeEntry(key, conn.SnapshotTTL(), data)
+	c.storeEntry(key, gen, conn.SnapshotTTL(), data)
 	return data, nil
 }
 
@@ -97,6 +113,7 @@ func (c *SnapshotCache) revalidateLocked(key cacheKey, conn Connector, account *
 		return
 	}
 	c.inflight[key] = struct{}{}
+	gen := c.gen[key]
 
 	go func() {
 		// Detached from the request context on purpose: the render that
@@ -117,12 +134,18 @@ func (c *SnapshotCache) revalidateLocked(key cacheKey, conn Connector, account *
 				"connector", key.connector, "user", key.userID, "err", err)
 			return
 		}
-		c.storeEntry(key, conn.SnapshotTTL(), data)
+		c.storeEntry(key, gen, conn.SnapshotTTL(), data)
 	}()
 }
 
-func (c *SnapshotCache) storeEntry(key cacheKey, ttl time.Duration, data map[string]any) {
+// storeEntry caches data for key unless the key was invalidated (generation
+// bumped) after the fetch began — a snapshot fetched under an account that
+// has since changed must not resurrect itself past the invalidation.
+func (c *SnapshotCache) storeEntry(key cacheKey, gen uint64, ttl time.Duration, data map[string]any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.gen[key] != gen {
+		return
+	}
 	c.entries[key] = &cacheEntry{data: data, fetchedAt: c.now(), ttl: ttl}
 }

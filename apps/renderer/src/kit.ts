@@ -27,7 +27,7 @@ import addFormatsExport, { type FormatsPlugin } from "ajv-formats";
 const addFormats = addFormatsExport as unknown as FormatsPlugin;
 
 import type { NodeGroup, RenderItem } from "./animate.js";
-import { nativeGenerators } from "./native.js";
+import { connectorSubtree, nativeGenerators } from "./native.js";
 import { repoPath } from "./paths.js";
 import { resolveDeep } from "./template.js";
 import type { DesignNode, InstanceNode } from "./types.js";
@@ -64,6 +64,13 @@ export interface KitComponent {
    * fallback/palette preview. Community publish validation rejects the flag.
    */
   native?: true;
+  /**
+   * The connector whose snapshot subtree a native component's dataFields
+   * address ("wakatime", "leetcode", "rss"). Absent means "github" — the
+   * original native set predates multi-connector natives. Expansion passes
+   * the generator exactly data[dataConnector].
+   */
+  dataConnector?: string;
   /** Connector snapshot paths a native component consumes (e.g. "stats.calendar"). */
   dataFields?: string[];
 }
@@ -305,11 +312,11 @@ export function parseCommunityComponent(
   }
   // Native components are official-kit only: their nodes come from trusted
   // generator code in this service, so a community definition claiming
-  // native (or its dataFields companion) is rejected outright — community
-  // components stay declarative-only (architecture.md §7.5).
-  if ("native" in raw || "dataFields" in raw) {
+  // native (or its dataFields/dataConnector companions) is rejected outright
+  // — community components stay declarative-only (architecture.md §7.5).
+  if ("native" in raw || "dataFields" in raw || "dataConnector" in raw) {
     throw new KitError(
-      `${context}: "native"/"dataFields" are reserved for the official kit — ` +
+      `${context}: "native"/"dataFields"/"dataConnector" are reserved for the official kit — ` +
         `community components are declarative-only`,
     );
   }
@@ -497,6 +504,11 @@ export function expandInstance(
   // Native components (§5.7): a trusted generator (src/native.ts, keyed by
   // the id without the "kit/" prefix) produces the nodes from (props, data,
   // frame) — array-driven visuals that declarative fragments cannot express.
+  // The generator sees ONLY its own connector's snapshot subtree
+  // (data[dataConnector], default github — the metadata qualifier added with
+  // the multi-connector natives): generators stay connector-relative
+  // ("stats.days", never "wakatime.stats.days"), and a missing or non-object
+  // subtree degrades to the generator's own empty-state rendering.
   // Generated nodes are frame-relative and flow through the exact same
   // scale/offset/id-prefix treatment as declarative fragments below. No
   // generator registered → fall through to the component's declared static
@@ -510,7 +522,7 @@ export function expandInstance(
         let stripped = false;
         const generated: KitFragmentNode[] = generator({
           props,
-          data,
+          data: connectorSubtree(data, component.dataConnector ?? "github"),
           frame: component.frame,
         }).map((gen) => {
           scaleAndOffset(gen, s, node.x, node.y);

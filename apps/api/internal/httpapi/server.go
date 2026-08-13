@@ -98,6 +98,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/me", s.handleMe)
 	mux.HandleFunc("GET /v1/connectors", s.requireSession(s.handleConnectors))
 	mux.HandleFunc("GET /v1/connectors/data", s.requireSession(s.handleConnectorData))
+	// Config-account framework (auth tiers none/api_key): connect by pasting
+	// per-connector config, disconnect by deleting it.
+	mux.HandleFunc("PUT /v1/connectors/{name}/account", s.requireSession(s.handlePutConnectorAccount))
+	mux.HandleFunc("DELETE /v1/connectors/{name}/account", s.requireSession(s.handleDeleteConnectorAccount))
 
 	// Everything else: JSON 404 envelope instead of the default text page.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

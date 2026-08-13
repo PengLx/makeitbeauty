@@ -50,7 +50,12 @@
     },
     "native": {
       "const": true,
-      "description": "Official-kit only: the renderer produces this component's nodes with a trusted generator from (props, data, frame) — array-driven visuals (heatmap cells, language bars) that declarative fragments cannot express. The declared nodes remain as the static fallback/palette preview. Community publish validation rejects this flag; declaring it requires dataFields."
+      "description": "Official-kit only: the renderer produces this component's nodes with a trusted generator from (props, data, frame) — array-driven visuals (heatmap cells, language bars) that declarative fragments cannot express. The data the generator sees is the snapshot subtree of the component's dataConnector (default github). The declared nodes remain as the static fallback/palette preview. Community publish validation rejects this flag; declaring it requires dataFields."
+    },
+    "dataConnector": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,23}$",
+      "description": "The connector whose snapshot subtree this native component's dataFields address, as a slug (\"wakatime\", \"leetcode\", \"rss\"). Absent means \"github\" — the original native set predates multi-connector natives, so absence defaults rather than requiring every file to say so. Only meaningful with native: true (it qualifies dataFields; loaders enforce that pairing — deliberately not a dependentRequired here so the default-github story stays documented in one place). The renderer passes the generator exactly data[dataConnector]; binding derivation unions dataFields into THIS connector's binding. Community publish validation rejects it along with native/dataFields."
     },
     "dataFields": {
       "type": "array",
@@ -58,10 +63,10 @@
       "maxItems": 16,
       "items": {
         "type": "string",
-        "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+$",
+        "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*$",
         "maxLength": 128
       },
-      "description": "Connector snapshot paths (e.g. \"stats.calendar\") a native component consumes directly — no {{templates}} involved. Binding derivation unions these into the design's connector binding (v0: the github connector) for every instance of the component, so the consent record stays complete."
+      "description": "Connector snapshot paths a native component consumes directly — no {{templates}} involved. Paths are relative to the component's dataConnector subtree and may be dotted (\"stats.calendar\") or a bare top-level key (\"posts\" — some snapshots keep a series at the root). Binding derivation unions these into the design's binding for the component's dataConnector (default github) for every instance of the component, so the consent record stays complete."
     }
   },
   "dependentRequired": {

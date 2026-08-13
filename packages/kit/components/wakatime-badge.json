@@ -1,0 +1,41 @@
+{
+  "id": "wakatime-badge",
+  "title": "WakaTime badge",
+  "category": "stats",
+  "description": "Compact pill showing this week's WakaTime coding hours. Declarative: the hours resolve straight from the wakatime connector snapshot ({{wakatime.stats.weeklyHours}}) — cross-connector scalars are plain template bindings, no native machinery.",
+  "frame": { "w": 220, "h": 56 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Suffix after the hours count.",
+      "default": "this week"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Color of the status dot.",
+      "default": "#3fb950"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 220, "h": 56,
+      "style": { "fill": "#161b22", "radius": 28, "stroke": "#30363d", "strokeWidth": 1 }
+    },
+    {
+      "id": "dot",
+      "type": "rect",
+      "x": 20, "y": 24, "w": 8, "h": 8,
+      "style": { "fill": "{{props.accent}}", "radius": 4 }
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "x": 36, "y": 19, "w": 168, "h": 18,
+      "text": "{{wakatime.stats.weeklyHours}}h {{props.label}}",
+      "style": { "fontSize": 14, "fontWeight": 600, "color": "#e6edf3" },
+      "animation": { "preset": "fadeIn", "durationMs": 700 }
+    }
+  ]
+}

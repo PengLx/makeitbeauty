@@ -242,10 +242,13 @@ describe("kit loading", () => {
     expect([...loaded.keys()].sort()).toEqual([
       "kit/accent-divider",
       "kit/activity-sparkline",
+      "kit/blog-latest",
+      "kit/coding-activity",
       "kit/contribution-heatmap",
       "kit/glow-stat",
       "kit/gradient-banner",
       "kit/language-bar",
+      "kit/leetcode-solved",
       "kit/metric-badge",
       "kit/profile-header",
       "kit/progress-bar",
@@ -255,6 +258,7 @@ describe("kit loading", () => {
       "kit/streak-flame",
       "kit/terminal-card",
       "kit/text-banner",
+      "kit/wakatime-badge",
     ]);
     for (const component of loaded.values()) expect(component.nodes.length).toBeGreaterThan(0);
   });

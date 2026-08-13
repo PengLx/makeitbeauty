@@ -1,0 +1,94 @@
+{
+  "id": "leetcode-solved",
+  "title": "LeetCode solved",
+  "category": "data",
+  "description": "Total problems solved with an easy/medium/hard difficulty bar and per-difficulty counts (LeetCode's green/orange/red, tuned to GitHub-dark). Native component — the renderer generates the bar from the leetcode connector's solved counts; the nodes below are the static palette preview.",
+  "native": true,
+  "dataConnector": "leetcode",
+  "dataFields": ["solved.total", "solved.easy", "solved.medium", "solved.hard"],
+  "frame": { "w": 320, "h": 120 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Small heading above the total.",
+      "default": "LEETCODE SOLVED"
+    },
+    "trackColor": {
+      "type": "string",
+      "description": "Bar background behind the difficulty segments.",
+      "default": "#21262d"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 320, "h": 120,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 14, "w": 280, "h": 16,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "total",
+      "type": "text",
+      "x": 20, "y": 30, "w": 280, "h": 34,
+      "text": "486",
+      "style": { "fontSize": 28, "fontWeight": 700, "color": "#e6edf3" }
+    },
+    {
+      "id": "track",
+      "type": "rect",
+      "x": 20, "y": 76, "w": 280, "h": 8,
+      "style": { "fill": "{{props.trackColor}}", "radius": 4 }
+    },
+    {
+      "id": "pv-easy",
+      "type": "rect",
+      "x": 20, "y": 76, "w": 116, "h": 8,
+      "style": { "fill": "#3fb950", "radius": 4 }
+    },
+    {
+      "id": "pv-medium",
+      "type": "rect",
+      "x": 136, "y": 76, "w": 135, "h": 8,
+      "style": { "fill": "#ffa657", "radius": 0 }
+    },
+    {
+      "id": "pv-hard",
+      "type": "rect",
+      "x": 271, "y": 76, "w": 29, "h": 8,
+      "style": { "fill": "#ff7b72", "radius": 4 }
+    },
+    {
+      "id": "pv-count-easy",
+      "type": "text",
+      "x": 20, "y": 94, "w": 90, "h": 15,
+      "text": "201 easy",
+      "style": { "fontSize": 11, "fontWeight": 600, "color": "#3fb950" }
+    },
+    {
+      "id": "pv-count-medium",
+      "type": "text",
+      "x": 113.33, "y": 94, "w": 90, "h": 15,
+      "text": "235 medium",
+      "style": { "fontSize": 11, "fontWeight": 600, "color": "#ffa657" }
+    },
+    {
+      "id": "pv-count-hard",
+      "type": "text",
+      "x": 206.67, "y": 94, "w": 90, "h": 15,
+      "text": "50 hard",
+      "style": { "fontSize": 11, "fontWeight": 600, "color": "#ff7b72" }
+    }
+  ]
+}

@@ -64,7 +64,7 @@ const STATUS_HINT: Partial<Record<ConnectorStatus, string>> = {
   unconfigured: "Not configured",
 };
 
-function TypeBadge({ type }: { type: BindingKind }) {
+function TypeBadge({ type }: { type: string }) {
   return (
     <span className="rounded border px-1 text-[9px] uppercase tracking-wider text-muted-foreground">
       {type}
@@ -157,8 +157,13 @@ export function FieldSelect({
   const eligible = connectors
     .map((c) => ({
       info: c,
-      fields: (c.fields ?? []).filter(
-        (f) => kind === undefined || f.type === kind,
+      // No kind = the text insert surface: every PRIMITIVE field (numbers
+      // stringify; structured "series" fields are native-component food — a
+      // {{template}} of one only renders a placeholder, so don't offer it).
+      fields: (c.fields ?? []).filter((f) =>
+        kind === undefined
+          ? f.type === "string" || f.type === "number"
+          : f.type === kind,
       ),
     }))
     .filter((g) => g.fields.length > 0);

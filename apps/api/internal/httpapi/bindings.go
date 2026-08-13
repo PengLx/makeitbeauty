@@ -15,13 +15,10 @@ import (
 // equivalent to walking every string value in it.
 var templatePattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\s*\}\}`)
 
-// nativeConnector is the connector native kit components consume. v0
-// assumption: every native component reads GitHub data — kit metadata
-// declares dataFields as bare snapshot paths ("stats.calendar") without a
-// connector prefix, and derivation pins them to the github binding. When a
-// second connector grows natives, dataFields will need a connector qualifier
-// and this constant dissolves.
-const nativeConnector = "github"
+// defaultNativeConnector is the connector a native kit component consumes
+// when its metadata declares no dataConnector: the original native set reads
+// GitHub data and predates the qualifier, so absence means github.
+const defaultNativeConnector = "github"
 
 // deriveBindings scans a design for {{connector.field}} templates and returns
 // the bindings the design actually consumes. Bindings are derived, never
@@ -33,9 +30,10 @@ const nativeConnector = "github"
 // Native kit components have no templates — the renderer's trusted generator
 // consumes connector data directly — so every instance node referencing a
 // native component unions that component's declared dataFields into the
-// github binding (v0: natives are fixed to github, see nativeConnector).
-// Without this, native visuals would be filtered to nothing at render time
-// and the consent record would omit what the image publicly displays.
+// binding of the component's dataConnector (default github, see
+// defaultNativeConnector). Without this, native visuals would be filtered to
+// nothing at render time and the consent record would omit what the image
+// publicly displays.
 //
 // Rules: the first path segment must be a registered connector ("props.*" is
 // kit-prop templating, and literal text that merely looks like a template is
@@ -59,14 +57,21 @@ func deriveBindings(design json.RawMessage, knownConnectors []string, kitCompone
 		fields[conn][rest] = true
 	}
 
-	if known[nativeConnector] {
-		for _, f := range nativeDataFields(design, kitComponents) {
-			if fields[nativeConnector] == nil {
-				fields[nativeConnector] = map[string]bool{}
-			}
-			fields[nativeConnector][f] = true
+	for conn, fs := range nativeDataFields(design, kitComponents) {
+		if !known[conn] {
+			// A native pointing at an unregistered connector contributes
+			// nothing — same rule as template references.
+			continue
+		}
+		if fields[conn] == nil {
+			fields[conn] = map[string]bool{}
+		}
+		for _, f := range fs {
+			fields[conn][f] = true
 		}
 	}
+
+	kitFragmentFields(design, kitComponents, known, fields)
 
 	connectors := make([]string, 0, len(fields))
 	for conn := range fields {
@@ -86,15 +91,78 @@ func deriveBindings(design json.RawMessage, knownConnectors []string, kitCompone
 	return bindings
 }
 
-// nativeDataFields returns the union of dataFields declared by every native
-// kit component the design instantiates. An unparseable design contributes
+// kitFragmentFields unions {{connector.field}} templates found inside the
+// fragments of DECLARATIVE kit components the design instantiates. Kit
+// fragments are trusted first-party content and may bind connector data
+// directly (e.g. wakatime-badge's "{{wakatime.stats.weeklyHours}}h" —
+// community fragments cannot: the props-only publish rule blocks them).
+// What a fragment displays must land in the consent record exactly like a
+// design-level template, or production filters the field away and the
+// component renders an em-dash despite a connected account. Native
+// components are skipped: their preview nodes are static and their real
+// data flows through dataFields.
+func kitFragmentFields(design json.RawMessage, kitComponents []kit.Component, known map[string]bool, fields map[string]map[string]bool) {
+	fragments := map[string]json.RawMessage{}
+	for _, c := range kitComponents {
+		if !c.Native && len(c.Nodes) > 0 {
+			fragments[c.ID] = c.Nodes
+		}
+	}
+	if len(fragments) == 0 {
+		return
+	}
+
+	var doc struct {
+		Nodes []struct {
+			Type      string `json:"type"`
+			Component string `json:"component"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(design, &doc); err != nil {
+		return
+	}
+
+	scanned := map[string]bool{}
+	for _, node := range doc.Nodes {
+		if node.Type != "instance" || scanned[node.Component] {
+			continue
+		}
+		scanned[node.Component] = true
+		nodes, ok := fragments[node.Component]
+		if !ok {
+			continue
+		}
+		for _, m := range templatePattern.FindAllStringSubmatch(string(nodes), -1) {
+			conn, rest, _ := strings.Cut(m[1], ".")
+			if !known[conn] { // "props" is never a known connector
+				continue
+			}
+			if fields[conn] == nil {
+				fields[conn] = map[string]bool{}
+			}
+			fields[conn][rest] = true
+		}
+	}
+}
+
+// nativeDataFields returns the dataFields declared by every native kit
+// component the design instantiates, grouped by each component's
+// dataConnector (defaulted to github). An unparseable design contributes
 // nothing — schema validation is the renderer's job, and template-derived
 // bindings already work on the raw bytes.
-func nativeDataFields(design json.RawMessage, kitComponents []kit.Component) []string {
-	byID := map[string][]string{}
+func nativeDataFields(design json.RawMessage, kitComponents []kit.Component) map[string][]string {
+	type native struct {
+		connector string
+		fields    []string
+	}
+	byID := map[string]native{}
 	for _, c := range kitComponents {
 		if c.Native && len(c.DataFields) > 0 {
-			byID[c.ID] = c.DataFields
+			conn := c.DataConnector
+			if conn == "" {
+				conn = defaultNativeConnector
+			}
+			byID[c.ID] = native{connector: conn, fields: c.DataFields}
 		}
 	}
 	if len(byID) == 0 {
@@ -111,12 +179,14 @@ func nativeDataFields(design json.RawMessage, kitComponents []kit.Component) []s
 		return nil
 	}
 
-	var out []string
+	out := map[string][]string{}
 	for _, node := range doc.Nodes {
 		if node.Type != "instance" {
 			continue
 		}
-		out = append(out, byID[node.Component]...)
+		if n, ok := byID[node.Component]; ok {
+			out[n.connector] = append(out[n.connector], n.fields...)
+		}
 	}
 	return out
 }

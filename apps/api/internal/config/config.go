@@ -53,6 +53,12 @@ type Config struct {
 	// GitHubAPIURL is the base of GitHub's REST/GraphQL API
 	// (MIB_GITHUB_API_URL). Overridable for tests, like GitHubURL.
 	GitHubAPIURL string
+	// WakaTimeAPIURL is the base of the WakaTime REST API
+	// (MIB_WAKATIME_API_URL). Overridable so tests point at httptest servers.
+	WakaTimeAPIURL string
+	// LeetCodeAPIURL is the base of LeetCode's public GraphQL endpoint
+	// (MIB_LEETCODE_API_URL). Overridable for tests, like WakaTimeAPIURL.
+	LeetCodeAPIURL string
 }
 
 // Load reads configuration from the environment, applying defaults.
@@ -72,6 +78,8 @@ func Load() Config {
 		GitHubClientSecret: os.Getenv("MIB_GITHUB_CLIENT_SECRET"),
 		GitHubURL:          getenv("MIB_GITHUB_URL", "https://github.com"),
 		GitHubAPIURL:       getenv("MIB_GITHUB_API_URL", "https://api.github.com"),
+		WakaTimeAPIURL:     getenv("MIB_WAKATIME_API_URL", "https://api.wakatime.com"),
+		LeetCodeAPIURL:     getenv("MIB_LEETCODE_API_URL", "https://leetcode.com"),
 	}
 	// The public-URL default is dev-only on purpose: production must state
 	// its origin explicitly (Validate), never inherit a localhost default.

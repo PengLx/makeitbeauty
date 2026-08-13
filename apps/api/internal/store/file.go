@@ -612,3 +612,14 @@ func (s *fileConnectorAccounts) Update(_ context.Context, a *ConnectorAccount) e
 	s.db.accounts[key] = &cp
 	return s.db.persistAccounts()
 }
+
+func (s *fileConnectorAccounts) Delete(_ context.Context, userID, connector string) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	key := accountKey(userID, connector)
+	if _, ok := s.db.accounts[key]; !ok {
+		return ErrNotFound
+	}
+	delete(s.db.accounts, key)
+	return s.db.persistAccounts()
+}

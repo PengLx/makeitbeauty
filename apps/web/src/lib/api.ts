@@ -151,11 +151,17 @@ export type ConnectorStatus = "connected" | "unconfigured" | "expired";
  * relative to the connector; qualify with the connector name to build a
  * template (see qualifyPath in BindingControl). `type` drives the editor's
  * binding controls: a number input only offers number fields (§8).
+ *
+ * Beyond the template-bindable primitives, catalogs also carry structured
+ * fields ("series": github stats.calendar, wakatime stats.days, rss posts)
+ * consumed by native kit components — pickers list primitives only, since a
+ * {{template}} of a series can only resolve to a placeholder. Kept open so
+ * future field types degrade to "not offered" instead of breaking parses.
  */
 export interface ConnectorField {
   path: string;
   description?: string;
-  type: "string" | "number";
+  type: "string" | "number" | "series" | (string & {});
 }
 
 export interface ConnectorInfo {
@@ -192,6 +198,29 @@ export function getConnectorData(
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   return request("/v1/connectors/data", { signal });
+}
+
+/**
+ * PUT /v1/connectors/{name}/account — configure a config-tier connector
+ * (§6 auth tiers none/api_key: wakatime {apiKey}, leetcode {username},
+ * rss {feedUrl}). The API strict-decodes and validates the config, seals it
+ * at rest, and reports the connector's new status. GitHub is 400 here —
+ * login is its provisioning path.
+ */
+export function putConnectorAccount(
+  name: string,
+  config: Record<string, string>,
+): Promise<ConnectorSummary> {
+  return send("PUT", `/v1/connectors/${encodeURIComponent(name)}/account`, config);
+}
+
+/**
+ * DELETE /v1/connectors/{name}/account — disconnect: removes the account
+ * and its sealed config; the connector reverts to "unconfigured".
+ * Idempotent (204 either way).
+ */
+export function deleteConnectorAccount(name: string): Promise<void> {
+  return send("DELETE", `/v1/connectors/${encodeURIComponent(name)}/account`);
 }
 
 // ---- project CRUD (architecture §8) -------------------------------------

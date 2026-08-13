@@ -309,3 +309,14 @@ func (s *memConnectorAccounts) Update(_ context.Context, a *ConnectorAccount) er
 	s.m[key] = &cp
 	return nil
 }
+
+func (s *memConnectorAccounts) Delete(_ context.Context, userID, connector string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := accountKey(userID, connector)
+	if _, ok := s.m[key]; !ok {
+		return ErrNotFound
+	}
+	delete(s.m, key)
+	return nil
+}

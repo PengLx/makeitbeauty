@@ -129,6 +129,26 @@ Meaning: at expansion time, set node `fill`'s `w` to
 `clamp(props.percent × scale)`. The node still carries a schema-valid default
 value so the fragment renders as-is without expansion.
 
+### Native components and `dataConnector` (official kit only)
+
+A component whose metadata declares `native: true` + `dataFields` skips its
+declarative fragment at render time: a **trusted generator** inside the
+renderer (`apps/renderer/src/native.ts`) produces the nodes from
+`(props, data, frame)` — array-driven visuals (heatmap cells, proportional
+bars, post lists) that fragments cannot express. The declared `nodes` are
+only the static palette preview. Generated nodes flow through the exact same
+scale/offset/id-prefix expansion as declarative fragments.
+
+`dataConnector` names the connector whose snapshot subtree the generator
+receives as its `data` (`"wakatime"`, `"leetcode"`, `"rss"`); absent means
+`github`. `dataFields` paths are **relative to that subtree** — dotted
+(`"stats.days"`) or a bare top-level key (`"posts"`) — and the API unions
+them into the design's binding for that connector on every instance, so the
+consent record covers what the image publicly displays. A snapshot without
+the component's connector renders the component's own muted empty state,
+never a failure. Community publish validation rejects `native`, `dataFields`
+and `dataConnector` alike — community components stay declarative-only.
+
 ## Declarative by design
 
 v0 components are pure data: no code, no logic, no fetches. This is
@@ -202,6 +222,10 @@ of motion get the final, static frame.
 | `kit/activity-sparkline` | [components/activity-sparkline.json](components/activity-sparkline.json) | `data` | 360×100 | Native: last 84 days of commits as 12 weekly bars with a staggered `growY` entrance |
 | `kit/language-bar` | [components/language-bar.json](components/language-bar.json) | `data` | 720×110 | Native: top languages as a stacked horizontal bar with legend |
 | `kit/streak-flame` | [components/streak-flame.json](components/streak-flame.json) | `data` | 360×140 | Native: current contribution streak with pulsing flame accent + longest-streak record |
+| `kit/coding-activity` | [components/coding-activity.json](components/coding-activity.json) | `data` | 360×110 | Native (`wakatime`): last 7 days of coding minutes as daily `growY` bars + weekly-hours headline |
+| `kit/wakatime-badge` | [components/wakatime-badge.json](components/wakatime-badge.json) | `stats` | 220×56 | Pill binding `{{wakatime.stats.weeklyHours}}` directly — cross-connector scalars are plain templates |
+| `kit/leetcode-solved` | [components/leetcode-solved.json](components/leetcode-solved.json) | `data` | 320×120 | Native (`leetcode`): total solved + easy/medium/hard difficulty bar with per-difficulty counts |
+| `kit/blog-latest` | [components/blog-latest.json](components/blog-latest.json) | `data` | 480×150 | Native (`rss`): feed title + three latest posts (truncated titles, right-aligned dates, staggered `slideUp`) |
 
 All components use the GitHub-dark palette (`#0d1117` / `#161b22` / `#21262d`
 / `#30363d` / `#58a6ff` / `#e6edf3` / `#7d8590`) with consistent radii

@@ -402,5 +402,51 @@
         { "date": "2025-12-31", "count": 6 }
       ]
     }
+  },
+  "wakatime": {
+    "stats": {
+      "weeklyHours": 32.5,
+      "dailyAvgMinutes": 279,
+      "topLanguage": "TypeScript",
+      "topLanguages": [
+        { "name": "TypeScript", "percent": 44.2 },
+        { "name": "Go", "percent": 31.9 },
+        { "name": "Rust", "percent": 12.4 },
+        { "name": "Markdown", "percent": 6.3 },
+        { "name": "JSON", "percent": 5.2 }
+      ],
+      "days": [
+        { "date": "2025-08-01", "minutes": 312 },
+        { "date": "2025-08-02", "minutes": 148 },
+        { "date": "2025-08-03", "minutes": 96 },
+        { "date": "2025-08-04", "minutes": 365 },
+        { "date": "2025-08-05", "minutes": 292 },
+        { "date": "2025-08-06", "minutes": 331 },
+        { "date": "2025-08-07", "minutes": 406 }
+      ]
+    }
+  },
+  "leetcode": {
+    "solved": {
+      "total": 486,
+      "easy": 201,
+      "medium": 235,
+      "hard": 50
+    },
+    "profile": {
+      "ranking": 15234
+    }
+  },
+  "blog": {
+    "feed": {
+      "title": "Ada's Notebook"
+    },
+    "posts": [
+      { "title": "Notes on the Analytical Engine", "date": "2025-08-02" },
+      { "title": "Why deterministic renders matter", "date": "2025-07-19" },
+      { "title": "A tour of the connector model", "date": "2025-07-05" },
+      { "title": "Streaks, sparklines, and honest charts", "date": "2025-06-21" },
+      { "title": "Shipping a profile card with live data", "date": "2025-06-07" }
+    ]
   }
 }

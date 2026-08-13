@@ -33,6 +33,12 @@ export interface KitComponent {
   native?: boolean;
   /** Connector snapshot paths a native component consumes. */
   dataFields?: string[];
+  /**
+   * Connector whose snapshot qualifies dataFields (native-only; absent means
+   * github). The web treats natives connector-generically — this rides along
+   * so the type mirrors the /v1/kit wire contract.
+   */
+  dataConnector?: string;
 }
 
 export interface KitState {

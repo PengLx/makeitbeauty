@@ -138,6 +138,40 @@ func TestHandleKitHTTP(t *testing.T) {
 	}
 }
 
+// dataConnector rides through /v1/kit for natives that declare it (the
+// editor labels the data source and future pickers scope to it), and stays
+// omitted everywhere else — absent means the github default.
+func TestHandleKitDataConnectorPassthrough(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewServer(testConfig(), log, Deps{Stores: store.NewMemory(), Kit: []kit.Component{
+		{ID: "kit/contribution-heatmap", Title: "Heatmap", Frame: kit.Frame{W: 720, H: 140}, Props: json.RawMessage(`{}`), Native: true, DataFields: []string{"stats.calendar"}, Nodes: json.RawMessage(`[]`)},
+		{ID: "kit/stat-card", Title: "Stat card", Frame: kit.Frame{W: 260, H: 140}, Props: json.RawMessage(`{}`), Nodes: json.RawMessage(`[{"id":"bg","type":"rect"}]`)},
+		{ID: "kit/wakatime-days", Title: "WakaTime days", Frame: kit.Frame{W: 720, H: 120}, Props: json.RawMessage(`{}`), Native: true, DataConnector: "wakatime", DataFields: []string{"stats.days"}, Nodes: json.RawMessage(`[]`)},
+	}})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/kit", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 3 {
+		t.Fatalf("got %d components, want 3", len(raw))
+	}
+	// Sorted: heatmap, stat-card, wakatime-days.
+	if got := raw[2]["dataConnector"]; got != "wakatime" {
+		t.Errorf("wakatime-days dataConnector = %v, want wakatime", got)
+	}
+	for _, i := range []int{0, 1} {
+		if _, present := raw[i]["dataConnector"]; present {
+			t.Errorf("components[%d]: dataConnector should be omitted when the file omits it", i)
+		}
+	}
+}
+
 // A server with no kit components must serve [] — never null.
 func TestHandleKitEmpty(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

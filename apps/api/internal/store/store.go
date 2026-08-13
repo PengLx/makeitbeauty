@@ -161,6 +161,10 @@ type ConnectorAccounts interface {
 	// the natural key): resealed credentials after a token refresh, status
 	// flips to "expired". Returns ErrNotFound if no such account exists.
 	Update(ctx context.Context, a *ConnectorAccount) error
+	// Delete removes a user's account for one connector (disconnect: the
+	// sealed config is erased, the connector reverts to unconfigured).
+	// Returns ErrNotFound if no such account exists.
+	Delete(ctx context.Context, userID, connector string) error
 }
 
 // Components persists community-component registry entries (metadata +

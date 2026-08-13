@@ -70,6 +70,37 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	registry.Register(github)
+
+	// Config-tier connectors (WakaTime api_key; LeetCode and RSS public with
+	// per-user config). Their demo fixture backs the no-config path in dev
+	// ONLY: in production an unconfigured connector serves an empty snapshot,
+	// so designs binding its fields render em-dashes instead of demo data.
+	configFixturePath := ""
+	if cfg.Dev() {
+		configFixturePath = cfg.DemoDataPath
+	}
+	wakatime, err := connector.NewWakaTime(configFixturePath, connector.WakaTimeDeps{
+		APIBaseURL: cfg.WakaTimeAPIURL,
+		Sealer:     sealer,
+	})
+	if err != nil {
+		return err
+	}
+	registry.Register(wakatime)
+	leetcode, err := connector.NewLeetCode(configFixturePath, connector.LeetCodeDeps{
+		APIBaseURL: cfg.LeetCodeAPIURL,
+		Sealer:     sealer,
+	})
+	if err != nil {
+		return err
+	}
+	registry.Register(leetcode)
+	rss, err := connector.NewRSS(configFixturePath, connector.RSSDeps{Sealer: sealer})
+	if err != nil {
+		return err
+	}
+	registry.Register(rss)
+
 	cache := connector.NewSnapshotCache(registry, log)
 
 	renderer := render.NewClient(cfg.RendererURL, 15*time.Second)

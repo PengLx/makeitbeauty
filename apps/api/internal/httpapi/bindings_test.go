@@ -12,12 +12,18 @@ import (
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
 
-// testKit mirrors the shape of the loaded official kit: one native component
-// per series field plus a declarative one that must contribute nothing.
+// testKit mirrors the shape of the loaded official kit: native components
+// with and without a dataConnector qualifier (absent means github), one
+// pointing at an unregistered connector, plus a declarative one that must
+// contribute nothing.
 var testKit = []kit.Component{
 	{ID: "kit/contribution-heatmap", Title: "Contribution heatmap", Frame: kit.Frame{W: 720, H: 140}, Native: true, DataFields: []string{"stats.calendar"}},
 	{ID: "kit/streak-flame", Title: "Streak flame", Frame: kit.Frame{W: 360, H: 140}, Native: true, DataFields: []string{"stats.currentStreak", "stats.longestStreak"}},
+	{ID: "kit/wakatime-days", Title: "WakaTime days", Frame: kit.Frame{W: 720, H: 120}, Native: true, DataConnector: "wakatime", DataFields: []string{"stats.days"}},
+	{ID: "kit/spotify-now", Title: "Now playing", Frame: kit.Frame{W: 360, H: 120}, Native: true, DataConnector: "spotify", DataFields: []string{"track.name"}},
 	{ID: "kit/stat-card", Title: "Stat card", Frame: kit.Frame{W: 260, H: 140}},
+	{ID: "kit/wakatime-badge", Title: "WakaTime badge", Frame: kit.Frame{W: 220, H: 56},
+		Nodes: json.RawMessage(`[{"id":"t","type":"text","x":0,"y":0,"w":220,"h":56,"text":"{{wakatime.stats.weeklyHours}}h {{props.label}}"}]`)},
 }
 
 func TestDeriveBindings(t *testing.T) {
@@ -101,9 +107,44 @@ func TestDeriveBindings(t *testing.T) {
 			},
 		},
 		{
+			name:   "native with dataConnector unions into THAT connector's binding",
+			design: `{"nodes":[{"type":"instance","component":"kit/wakatime-days"}]}`,
+			want: []store.Binding{
+				{Connector: "wakatime", Fields: []string{"stats.days"}},
+			},
+		},
+		{
+			name:   "multi-connector natives split per connector, merged with templates",
+			design: `{"nodes":[{"type":"instance","component":"kit/contribution-heatmap"},{"type":"instance","component":"kit/wakatime-days"},{"text":"{{github.user.login}}"}]}`,
+			want: []store.Binding{
+				{Connector: "github", Fields: []string{"stats.calendar", "user.login"}},
+				{Connector: "wakatime", Fields: []string{"stats.days"}},
+			},
+		},
+		{
+			name:   "native with unregistered dataConnector contributes nothing",
+			design: `{"nodes":[{"type":"instance","component":"kit/spotify-now"}]}`,
+			want:   []store.Binding{},
+		},
+		{
 			name:   "declarative kit instance contributes no native fields",
 			design: `{"nodes":[{"type":"instance","component":"kit/stat-card"}]}`,
 			want:   []store.Binding{},
+		},
+		{
+			name:   "declarative kit fragment with a connector template derives its binding",
+			design: `{"nodes":[{"type":"instance","component":"kit/wakatime-badge"}]}`,
+			want: []store.Binding{
+				{Connector: "wakatime", Fields: []string{"stats.weeklyHours"}},
+			},
+		},
+		{
+			name:   "fragment templates merge with design templates across connectors",
+			design: `{"nodes":[{"type":"instance","component":"kit/wakatime-badge"},{"text":"{{github.user.login}}"}]}`,
+			want: []store.Binding{
+				{Connector: "github", Fields: []string{"user.login"}},
+				{Connector: "wakatime", Fields: []string{"stats.weeklyHours"}},
+			},
 		},
 		{
 			name:   "non-instance node referencing a native component id is ignored",
@@ -122,9 +163,9 @@ func TestDeriveBindings(t *testing.T) {
 	}
 }
 
-// v0 natives are hard-wired to the github connector; when github is not
-// registered the union must not invent a binding for it.
-func TestDeriveBindingsNativeRequiresGitHubConnector(t *testing.T) {
+// A native's dataConnector (default github) must be a registered connector;
+// otherwise the union must not invent a binding for it.
+func TestDeriveBindingsNativeRequiresRegisteredConnector(t *testing.T) {
 	design := json.RawMessage(`{"nodes":[{"type":"instance","component":"kit/contribution-heatmap"}]}`)
 	got := deriveBindings(design, []string{"wakatime"}, testKit)
 	if len(got) != 0 {

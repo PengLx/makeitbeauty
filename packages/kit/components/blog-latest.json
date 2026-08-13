@@ -1,0 +1,102 @@
+{
+  "id": "blog-latest",
+  "title": "Latest blog posts",
+  "category": "data",
+  "description": "The feed title and its three most recent posts — titles truncated to the width budget, dates right-aligned — entering with a staggered slideUp. Native component — the renderer generates the rows from the rss connector's feed.title and posts; the nodes below are the static palette preview.",
+  "native": true,
+  "dataConnector": "rss",
+  "dataFields": ["feed.title", "posts"],
+  "frame": { "w": 480, "h": 150 },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Heading shown when the feed has no title yet.",
+      "default": "BLOG"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Color of the per-post bullet dots.",
+      "default": "#58a6ff"
+    },
+    "background": {
+      "type": "string",
+      "description": "Card background fill.",
+      "default": "#161b22"
+    }
+  },
+  "nodes": [
+    {
+      "id": "bg",
+      "type": "rect",
+      "x": 0, "y": 0, "w": 480, "h": 150,
+      "style": { "fill": "{{props.background}}", "radius": 12, "stroke": "#21262d", "strokeWidth": 1 }
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "x": 20, "y": 14, "w": 440, "h": 16,
+      "text": "{{props.label}}",
+      "style": { "fontSize": 12, "fontWeight": 600, "color": "#7d8590", "letterSpacing": 1 }
+    },
+    {
+      "id": "pv-dot0",
+      "type": "rect",
+      "x": 20, "y": 51, "w": 6, "h": 6,
+      "style": { "fill": "{{props.accent}}", "radius": 3 }
+    },
+    {
+      "id": "pv-post0",
+      "type": "text",
+      "x": 34, "y": 44, "w": 334, "h": 20,
+      "text": "Notes on the Analytical Engine",
+      "style": { "fontSize": 14, "fontWeight": 500, "color": "#e6edf3" }
+    },
+    {
+      "id": "pv-date0",
+      "type": "text",
+      "x": 376, "y": 46, "w": 84, "h": 16,
+      "text": "2025-08-02",
+      "style": { "fontSize": 12, "color": "#7d8590", "align": "right" }
+    },
+    {
+      "id": "pv-dot1",
+      "type": "rect",
+      "x": 20, "y": 83, "w": 6, "h": 6,
+      "style": { "fill": "{{props.accent}}", "radius": 3 }
+    },
+    {
+      "id": "pv-post1",
+      "type": "text",
+      "x": 34, "y": 76, "w": 334, "h": 20,
+      "text": "Why deterministic renders matter",
+      "style": { "fontSize": 14, "fontWeight": 500, "color": "#e6edf3" }
+    },
+    {
+      "id": "pv-date1",
+      "type": "text",
+      "x": 376, "y": 78, "w": 84, "h": 16,
+      "text": "2025-07-19",
+      "style": { "fontSize": 12, "color": "#7d8590", "align": "right" }
+    },
+    {
+      "id": "pv-dot2",
+      "type": "rect",
+      "x": 20, "y": 115, "w": 6, "h": 6,
+      "style": { "fill": "{{props.accent}}", "radius": 3 }
+    },
+    {
+      "id": "pv-post2",
+      "type": "text",
+      "x": 34, "y": 108, "w": 334, "h": 20,
+      "text": "A tour of the connector model",
+      "style": { "fontSize": 14, "fontWeight": 500, "color": "#e6edf3" }
+    },
+    {
+      "id": "pv-date2",
+      "type": "text",
+      "x": 376, "y": 110, "w": 84, "h": 16,
+      "text": "2025-07-05",
+      "style": { "fontSize": 12, "color": "#7d8590", "align": "right" }
+    }
+  ]
+}

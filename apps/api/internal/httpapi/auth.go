@@ -115,6 +115,9 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "storing the connector account failed")
 		return
 	}
+	// Fresh credentials: drop any snapshot cached under the previous account
+	// state (e.g. expired-token stale data) so the next render refetches.
+	s.invalidateSnapshot(user.ID, "github")
 
 	now := time.Now().UTC()
 	session := &auth.Session{
@@ -258,24 +261,45 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// connectorStatuses summarizes the user's connector accounts for /v1/me and
-// /v1/connectors.
-func (s *Server) connectorStatuses(ctx context.Context, uid string) []connectorStatusView {
-	status := "unconfigured"
-	if account, err := s.stores.ConnectorAccounts.GetByUserConnector(ctx, uid, "github"); err == nil {
-		if account.Status == "expired" {
-			status = "expired"
-		} else {
-			status = "connected"
+// connectorNames lists the connectors /v1/me and /v1/connectors report:
+// every registered connector (sorted) when the snapshot registry is wired,
+// falling back to github alone otherwise (some tests wire no cache, and
+// github always exists — login is the first connector).
+func (s *Server) connectorNames() []string {
+	if s.cache != nil {
+		if names := s.cache.KnownConnectors(); len(names) > 0 {
+			return names
 		}
 	}
-	return []connectorStatusView{{Connector: "github", Status: status}}
+	return []string{"github"}
+}
+
+// connectorStatuses summarizes the user's connector accounts for /v1/me and
+// /v1/connectors: "unconfigured" without an account, "expired" when the
+// account is flagged for re-auth, "connected" otherwise.
+func (s *Server) connectorStatuses(ctx context.Context, uid string) []connectorStatusView {
+	names := s.connectorNames()
+	out := make([]connectorStatusView, 0, len(names))
+	for _, name := range names {
+		status := "unconfigured"
+		if account, err := s.stores.ConnectorAccounts.GetByUserConnector(ctx, uid, name); err == nil {
+			if account.Status == "expired" {
+				status = "expired"
+			} else {
+				status = "connected"
+			}
+		}
+		out = append(out, connectorStatusView{Connector: name, Status: status})
+	}
+	return out
 }
 
 // ---- GET /v1/connectors --------------------------------------------------
-// Session auth (wrapped by requireSession). The fields list drives the
-// editor's insert-binding picker; connector.GitHubFields is its single
-// source of truth (architecture.md §8).
+// Session auth (wrapped by requireSession). Every registered connector is
+// listed with its status and typed field catalog; the per-connector Fields
+// vars (connector.FieldsFor) are the single source of truth driving the
+// editor's insert-binding picker and the binding consent display
+// (architecture.md §8).
 
 type connectorView struct {
 	Connector string            `json:"connector"`
@@ -287,7 +311,11 @@ func (s *Server) handleConnectors(w http.ResponseWriter, r *http.Request) {
 	statuses := s.connectorStatuses(r.Context(), userID(r))
 	out := make([]connectorView, 0, len(statuses))
 	for _, st := range statuses {
-		out = append(out, connectorView{Connector: st.Connector, Status: st.Status, Fields: connector.GitHubFields})
+		fields := connector.FieldsFor(st.Connector)
+		if fields == nil {
+			fields = []connector.Field{} // never null on the wire
+		}
+		out = append(out, connectorView{Connector: st.Connector, Status: st.Status, Fields: fields})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

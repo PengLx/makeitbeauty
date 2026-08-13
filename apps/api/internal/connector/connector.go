@@ -7,10 +7,14 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/crypto"
+	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/fixture"
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
 
@@ -62,4 +66,95 @@ func (r *Registry) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// FieldsFor returns the typed field catalog of a connector name — the single
+// source of truth behind GET /v1/connectors' picker lists and the binding
+// consent display. Unknown names yield nil.
+func FieldsFor(name string) []Field {
+	switch name {
+	case "github":
+		return GitHubFields
+	case "wakatime":
+		return WakaTimeFields
+	case "leetcode":
+		return LeetCodeFields
+	case "rss":
+		return RSSFields
+	}
+	return nil
+}
+
+// ---- config-account framework ---------------------------------------------
+// Non-OAuth connectors (auth tiers none/api_key, architecture.md §6) are
+// configured by the user pasting a small config object once:
+// PUT /v1/connectors/{name}/account. The config is sealed into
+// ConnectorAccount.EncryptedCredentials exactly like OAuth credentials — an
+// API key is a credential, and a feed URL rides along under the same seal so
+// there is exactly one at-rest story for account state.
+
+// AccountConfig is the per-user configuration of a config-tier connector.
+// Implementations are plain JSON structs; Validate rejects malformed input
+// before it is sealed and stored.
+type AccountConfig interface {
+	Validate() error
+}
+
+// ConnectValidator is the optional deeper check an AccountConfig may
+// implement on top of Validate: it runs once at connect time
+// (PUT /v1/connectors/{name}/account), may perform I/O such as DNS lookups,
+// and a failure refuses the configuration before anything is stored.
+type ConnectValidator interface {
+	ValidateConnect(ctx context.Context) error
+}
+
+// NewAccountConfig returns an empty config value for a config-tier connector
+// name, ready for strict JSON decoding, or ok=false for OAuth-tier ("github")
+// and unknown names.
+func NewAccountConfig(name string) (AccountConfig, bool) {
+	switch name {
+	case "wakatime":
+		return &WakaTimeConfig{}, true
+	case "leetcode":
+		return &LeetCodeConfig{}, true
+	case "rss":
+		return &RSSConfig{}, true
+	}
+	return nil, false
+}
+
+// openAccountConfig unseals and decodes a connector account's config into
+// dst. Shared by the config-tier connectors' Fetch implementations.
+func openAccountConfig(sealer crypto.Sealer, name string, account *store.ConnectorAccount, dst any) error {
+	if sealer == nil {
+		return fmt.Errorf("connector: %s: account has config but no sealer is configured", name)
+	}
+	raw, err := sealer.Open(account.EncryptedCredentials)
+	if err != nil {
+		return fmt.Errorf("connector: %s: opening account config: %w", name, err)
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return fmt.Errorf("connector: %s: account config is not valid JSON: %w", name, err)
+	}
+	return nil
+}
+
+// loadFixture loads one connector's dev-fixture snapshot from the merged demo
+// document ({"github": {...}, "wakatime": {...}, ...}) under key. An empty
+// path means no fixture — the production posture: an unconfigured connector
+// then serves an EMPTY snapshot, so designs binding its fields render
+// em-dashes instead of demo data. A present file without the key degrades to
+// the same empty snapshot rather than failing boot.
+func loadFixture(path, key string) (map[string]any, error) {
+	if path == "" {
+		return nil, nil
+	}
+	var doc map[string]map[string]any
+	if err := fixture.LoadJSON(path, &doc); err != nil {
+		return nil, err
+	}
+	if inner := doc[key]; inner != nil {
+		return inner, nil
+	}
+	return map[string]any{}, nil
 }
