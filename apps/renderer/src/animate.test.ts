@@ -16,6 +16,12 @@ function rect(id: string, animation?: DesignNode["animation"]): DesignNode {
   return { id, type: "rect", x: 0, y: 0, w: 10, h: 10, animation };
 }
 
+/** Build an AnimatedLayer for composeSvg from a node, deriving the frame from it. */
+function layer(node: DesignNode, inner: string) {
+  const { x, y, w, h } = node;
+  return { node, frame: { x, y, w, h }, inner };
+}
+
 describe("splitNodes", () => {
   it("partitions animated nodes while preserving node order", () => {
     const nodes = [rect("a"), rect("b", { preset: "fadeIn" }), rect("c"), rect("d", { preset: "pulse" })];
@@ -73,34 +79,36 @@ describe("buildStyleBlock", () => {
     );
   });
 
-  it("emits growX keyframes with fill-box transform-box and left-center origin", () => {
+  it("emits growX keyframes with a bare class (origin is per-layer, not per-class)", () => {
     const css = buildStyleBlock(["growX"]);
     expect(css).toContain("@keyframes mib-growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}");
-    expect(css).toContain(
-      ".mib-growX{animation-name:mib-growX;transform-box:fill-box;transform-origin:left center}",
-    );
+    expect(css).toContain(".mib-growX{animation-name:mib-growX}");
+    expect(css).not.toContain("transform-box");
+    expect(css).not.toContain("transform-origin");
   });
 
-  it("emits growY keyframes with fill-box transform-box and center-bottom origin", () => {
+  it("emits growY keyframes with a bare class (origin is per-layer, not per-class)", () => {
     const css = buildStyleBlock(["growY"]);
     expect(css).toContain("@keyframes mib-growY{from{transform:scaleY(0)}to{transform:scaleY(1)}}");
-    expect(css).toContain(
-      ".mib-growY{animation-name:mib-growY;transform-box:fill-box;transform-origin:center bottom}",
-    );
+    expect(css).toContain(".mib-growY{animation-name:mib-growY}");
+    expect(css).not.toContain("transform-box");
+    expect(css).not.toContain("transform-origin");
   });
 
-  it("emits slideUp/slideLeft keyframes with fill-box transform-box", () => {
+  it("emits slideUp/slideLeft keyframes with bare classes (pure translate needs no origin)", () => {
     const up = buildStyleBlock(["slideUp"]);
     expect(up).toContain(
       "@keyframes mib-slideUp{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}",
     );
-    expect(up).toContain(".mib-slideUp{animation-name:mib-slideUp;transform-box:fill-box}");
+    expect(up).toContain(".mib-slideUp{animation-name:mib-slideUp}");
+    expect(up).not.toContain("transform-box");
 
     const left = buildStyleBlock(["slideLeft"]);
     expect(left).toContain(
       "@keyframes mib-slideLeft{from{transform:translateX(8px);opacity:0}to{transform:none;opacity:1}}",
     );
-    expect(left).toContain(".mib-slideLeft{animation-name:mib-slideLeft;transform-box:fill-box}");
+    expect(left).toContain(".mib-slideLeft{animation-name:mib-slideLeft}");
+    expect(left).not.toContain("transform-box");
   });
 
   it("emits blink keyframes with per-keyframe step-end timing, no transform extras", () => {
@@ -113,8 +121,12 @@ describe("buildStyleBlock", () => {
     expect(css).not.toContain(".mib-blink{animation-name:mib-blink;transform");
   });
 
-  it("keeps opacity-only presets free of transform-box", () => {
-    expect(buildStyleBlock(["fadeIn", "pulse", "blink"])).not.toContain("transform-box");
+  it("never emits transform-box for any preset (origins are absolute, per layer)", () => {
+    const css = buildStyleBlock([
+      "fadeIn", "pulse", "float", "growX", "growY", "slideUp", "slideLeft", "blink",
+    ]);
+    expect(css).not.toContain("transform-box");
+    expect(css).not.toContain("transform-origin");
   });
 
   it("orders new presets stably after the original trio", () => {
@@ -162,8 +174,8 @@ describe("namespaceIds", () => {
 describe("composeSvg", () => {
   it("composes base + per-node groups + one style block, deterministically", () => {
     const layers = [
-      { node: rect("accent", { preset: "fadeIn", durationMs: 900 }), inner: "<rect id='l1'/>" },
-      { node: rect("orb", { preset: "float" }), inner: "<rect id='l2'/>" },
+      layer(rect("accent", { preset: "fadeIn", durationMs: 900 }), "<rect id='l1'/>"),
+      layer(rect("orb", { preset: "float" }), "<rect id='l2'/>"),
     ];
     const a = composeSvg(canvas, "<rect id='base'/>", layers);
     const b = composeSvg(canvas, "<rect id='base'/>", layers);
@@ -188,11 +200,11 @@ describe("composeSvg", () => {
 
   it("composes a design using every new preset deterministically", () => {
     const layers = [
-      { node: rect("bar", { preset: "growX" as const, durationMs: 900 }), inner: "<rect/>" },
-      { node: rect("col", { preset: "growY" as const }), inner: "<rect/>" },
-      { node: rect("txt", { preset: "slideUp" as const, delayMs: 120 }), inner: "<rect/>" },
-      { node: rect("row", { preset: "slideLeft" as const }), inner: "<rect/>" },
-      { node: rect("cur", { preset: "blink" as const, loop: true }), inner: "<rect/>" },
+      layer(rect("bar", { preset: "growX" as const, durationMs: 900 }), "<rect/>"),
+      layer(rect("col", { preset: "growY" as const }), "<rect/>"),
+      layer(rect("txt", { preset: "slideUp" as const, delayMs: 120 }), "<rect/>"),
+      layer(rect("row", { preset: "slideLeft" as const }), "<rect/>"),
+      layer(rect("cur", { preset: "blink" as const, loop: true }), "<rect/>"),
     ];
     const a = composeSvg(canvas, "<rect/>", layers);
     const b = composeSvg(canvas, "<rect/>", layers);
@@ -201,8 +213,41 @@ describe("composeSvg", () => {
       expect(a).toContain(`@keyframes mib-${p}`);
       expect(a).toContain(`class="mib-${p}"`);
     }
-    expect(a).toContain("transform-box:fill-box");
+    expect(a).not.toContain("transform-box"); // absolute origins made fill-box obsolete
     expect(a).toContain('<g id="node-cur" class="mib-blink"');
     expect(a).toContain("animation-iteration-count:infinite");
+  });
+
+  it("anchors growX/growY origins to the node's own frame at NON-ZERO x/y (bbox-inflation regression)", () => {
+    // A full-canvas satori pass used to inflate the fill-box bbox to the whole
+    // canvas, so a bar at x=300 scaled in from the canvas edge. The origin must
+    // be the node's left-center (growX) / bottom-center (growY), absolutely.
+    const bar: DesignNode = {
+      id: "bar", type: "rect", x: 300, y: 120, w: 200, h: 8,
+      animation: { preset: "growX" },
+    };
+    const col: DesignNode = {
+      id: "col", type: "rect", x: 640, y: 40, w: 30, h: 180,
+      animation: { preset: "growY" },
+    };
+    const svg = composeSvg(canvas, "<rect/>", [layer(bar, "<rect/>"), layer(col, "<rect/>")]);
+    // growX: {x}px {y + h/2}px — computed from the fixture geometry above.
+    expect(svg).toContain(`;transform-origin:${bar.x}px ${bar.y + bar.h / 2}px"`);
+    // growY: {x + w/2}px {y + h}px
+    expect(svg).toContain(`;transform-origin:${col.x + col.w / 2}px ${col.y + col.h}px"`);
+    expect(svg).not.toContain("transform-box");
+  });
+
+  it("emits no transform-origin for slideUp/slideLeft (pure translate) or opacity presets", () => {
+    const layers = [
+      layer(rect("up", { preset: "slideUp" }), "<rect/>"),
+      layer(rect("left", { preset: "slideLeft" }), "<rect/>"),
+      layer(rect("fade", { preset: "fadeIn" }), "<rect/>"),
+      layer(rect("pulse", { preset: "pulse", loop: true }), "<rect/>"),
+      layer(rect("orb", { preset: "float", loop: true }), "<rect/>"),
+    ];
+    const svg = composeSvg(canvas, "<rect/>", layers);
+    expect(svg).not.toContain("transform-origin");
+    expect(svg).not.toContain("transform-box");
   });
 });

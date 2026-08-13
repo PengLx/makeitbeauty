@@ -100,9 +100,11 @@ Secure cookies.
    canvas), composed as `<g id="node-{id}">` layers over the static base pass, and
    a single injected `<style>` block carries preset `@keyframes` plus a
    `prefers-reduced-motion` guard. Presets: `fadeIn`, `pulse`, `float`,
-   `growX`, `growY`, `slideUp`, `slideLeft`, `blink` — transform presets emit
-   `transform-box: fill-box` so scale/translate originate from the element's
-   own box, not the viewport.
+   `growX`, `growY`, `slideUp`, `slideLeft`, `blink` — scale presets carry an
+   absolute per-layer `transform-origin` computed from the node's frame at
+   compose time (never `transform-box: fill-box`: layer passes contain a
+   full-canvas transparent rect that inflates the fill-box to the whole
+   canvas, making growth start at the canvas edge).
 5. **Sanitize** (allowlist): reject `<script>`, `<foreignObject>`, `on*` attributes,
    `javascript:` hrefs, and **any external URL reference** (only `data:` URIs pass).
    External refs are not just broken-through-Camo — connector data + an

@@ -166,10 +166,13 @@ set `loop: true` explicitly (see `accent-divider`'s cursor). Timing defaults:
 `durationMs` 800, `delayMs` 0. Stagger entrances by giving sibling nodes
 increasing `delayMs` (see `profile-header` and `stat-trio`).
 
-The transform presets (`growX`, `growY`, `slideUp`, `slideLeft`) are compiled
-with `transform-box: fill-box` plus a `transform-origin`, so the transform
-originates from the animated element's own bounding box — not the SVG
-view-box. All output is guarded by `prefers-reduced-motion`: users who opt out
+The scale presets (`growX`, `growY`) get an ABSOLUTE `transform-origin`
+computed from the animated node's frame at compose time (left-center /
+bottom-center in viewBox units), so growth always starts at the element's own
+edge. (`transform-box: fill-box` was abandoned: every animated layer is a
+full-canvas satori pass containing a transparent root rect, which inflated the
+fill-box to the whole canvas — bars visibly grew in from the canvas edge.)
+`slideUp`/`slideLeft` are pure translates and need no origin. All output is guarded by `prefers-reduced-motion`: users who opt out
 of motion get the final, static frame.
 
 ## Components (v0)

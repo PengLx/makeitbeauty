@@ -91,6 +91,7 @@ export async function render(
     );
     animated.push({
       node: { id: layer.id, animation: layer.animation },
+      frame: layer.frame,
       inner: stripSvgWrapper(pass),
     });
   }

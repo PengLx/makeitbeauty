@@ -44,22 +44,49 @@ const KEYFRAMES: Record<AnimationPreset, string> = {
 };
 
 /**
- * Per-preset declarations emitted alongside animation-name in the injected
- * <style>. Transform presets need them because animated layers are SVG <g>
- * elements: without `transform-box: fill-box`, transform-origin resolves
- * against the whole view-box, so scaleX(0)→scaleX(1) would sweep from the
- * canvas edge instead of growing out of the element's own box. fill-box +
- * transform-origin pin the transform to the element's own bounding box
- * (supported by Chrome/Firefox/Safari since 2017+, so safe for GitHub-rendered
- * SVGs). The original trio (fadeIn/pulse/float) intentionally has NO extras —
- * their emitted bytes must not change for existing designs.
+ * The frame of one animated layer in canvas coordinates: a plain node's own
+ * {x,y,w,h}, or the instance node's frame for a grouped layer. Nodes expanded
+ * out of instances carry post-scale/offset geometry, so these are always
+ * final view-box user units.
  */
-const PRESET_CLASS_EXTRAS: Partial<Record<AnimationPreset, string>> = {
-  growX: "transform-box:fill-box;transform-origin:left center", // bar grows out rightwards
-  growY: "transform-box:fill-box;transform-origin:center bottom", // column grows upwards
-  slideUp: "transform-box:fill-box", // translate is origin-independent; fill-box for consistency
-  slideLeft: "transform-box:fill-box",
-};
+export interface LayerFrame {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Format a user-unit coordinate: round to 2 decimals (kills float noise), deterministic. */
+function px(n: number): string {
+  return `${Math.round(n * 100) / 100}px`;
+}
+
+/**
+ * Absolute per-layer transform-origin for scale presets, in view-box user
+ * units (undefined for presets that need none — opacity presets and the pure
+ * translates slideUp/slideLeft are origin-independent).
+ *
+ * Why absolute instead of `transform-box:fill-box` + a relative origin: every
+ * animated layer is a full-canvas satori pass, and satori emits a full-canvas
+ * transparent background <rect> for the pass's root div. That rect is rendered
+ * geometry, so it inflates the composed <g>'s fill-box bounding box to the
+ * whole canvas and a "left center" origin lands on the canvas edge — a bar at
+ * x=300 then scales in from x=0, visually entering from outside the component.
+ * Compose time knows every layer's exact frame, so we pin the origin to it in
+ * user units (the SVG CSS default transform-box is view-box, where px values
+ * are user units from the view-box origin). This also sidesteps WebKit
+ * fill-box quirks entirely.
+ */
+export function transformOrigin(preset: AnimationPreset, frame: LayerFrame): string | undefined {
+  switch (preset) {
+    case "growX":
+      return `${px(frame.x)} ${px(frame.y + frame.h / 2)}`; // left center: bar grows out rightwards
+    case "growY":
+      return `${px(frame.x + frame.w / 2)} ${px(frame.y + frame.h)}`; // center bottom: column grows upwards
+    default:
+      return undefined;
+  }
+}
 
 export interface SplitNodes {
   staticNodes: DesignNode[];
@@ -83,6 +110,8 @@ export interface NodeGroup {
   kind: "group";
   id: string;
   animation: Animation;
+  /** The instance node's frame — the whole group scales/slides around it. */
+  frame: LayerFrame;
   nodes: DesignNode[];
 }
 
@@ -93,6 +122,8 @@ export type RenderItem = DesignNode | NodeGroup;
 export interface LayerSpec {
   id: string;
   animation: Animation;
+  /** Layer frame in canvas coordinates — anchors transform-origin for scale presets. */
+  frame: LayerFrame;
   nodes: DesignNode[];
 }
 
@@ -111,9 +142,10 @@ export function splitRenderItems(items: RenderItem[]): SplitRenderItems {
   const layers: LayerSpec[] = [];
   for (const item of items) {
     if ("kind" in item) {
-      layers.push({ id: item.id, animation: item.animation, nodes: item.nodes });
+      layers.push({ id: item.id, animation: item.animation, frame: item.frame, nodes: item.nodes });
     } else if (item.animation) {
-      layers.push({ id: item.id, animation: item.animation, nodes: [item] });
+      const { x, y, w, h } = item;
+      layers.push({ id: item.id, animation: item.animation, frame: { x, y, w, h }, nodes: [item] });
     } else {
       staticNodes.push(item);
     }
@@ -154,12 +186,10 @@ export function buildStyleBlock(presets: Iterable<AnimationPreset>): string {
   const usedSet = new Set(presets);
   const used = PRESET_ORDER.filter((p) => usedSet.has(p));
   if (used.length === 0) return "";
-  const classes = used
-    .map((p) => {
-      const extras = PRESET_CLASS_EXTRAS[p];
-      return `.mib-${p}{animation-name:mib-${p}${extras ? `;${extras}` : ""}}`;
-    })
-    .join("");
+  // Classes carry only animation-name. Scale presets get their transform-origin
+  // per layer, inline (see transformOrigin) — never here, where one shared class
+  // could not know any layer's frame.
+  const classes = used.map((p) => `.mib-${p}{animation-name:mib-${p}}`).join("");
   const frames = used.map((p) => KEYFRAMES[p]).join("");
   return `<style>@media (prefers-reduced-motion: no-preference){${classes}${frames}}</style>`;
 }
@@ -167,6 +197,8 @@ export function buildStyleBlock(presets: Iterable<AnimationPreset>): string {
 export interface AnimatedLayer {
   /** The animated node — or, for an expanded instance group, its id + animation. */
   node: Pick<DesignNode, "id" | "animation">;
+  /** Layer frame in canvas coordinates — anchors transform-origin for scale presets. */
+  frame: LayerFrame;
   /** Inner SVG markup of this layer's transparent satori pass (wrapper stripped). */
   inner: string;
 }
@@ -189,11 +221,13 @@ export function namespaceIds(markup: string, prefix: string): string {
 export function composeSvg(canvas: Canvas, baseInner: string, layers: AnimatedLayer[]): string {
   const { width, height } = canvas;
   const groups = layers
-    .map(({ node, inner }) => {
+    .map(({ node, frame, inner }) => {
       const anim = node.animation;
       if (!anim) throw new Error(`node "${node.id}" in animated layer without animation`);
+      const origin = transformOrigin(anim.preset, frame);
+      const style = animationStyle(anim) + (origin ? `;transform-origin:${origin}` : "");
       return (
-        `<g id="node-${node.id}" class="mib-${anim.preset}" style="${animationStyle(anim)}">` +
+        `<g id="node-${node.id}" class="mib-${anim.preset}" style="${style}">` +
         `${namespaceIds(inner, `mib-${node.id}-`)}</g>`
       );
     })

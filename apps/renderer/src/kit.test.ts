@@ -183,7 +183,39 @@ describe("expandInstance animation grouping", () => {
     expect(group.id).toBe("inst");
     expect(group.animation).toEqual({ preset: "fadeIn", durationMs: 900 });
     expect(group.nodes.map((n) => n.id)).toEqual(["inst__bg", "inst__label", "inst__fill"]);
+    // The group layer's frame is the INSTANCE box in canvas coordinates —
+    // scale-preset origins anchor to it, not to any fragment-local geometry.
+    expect(group.frame).toEqual({ x: 20, y: 40, w: 100, h: 50 });
   });
+
+  it("anchors a grouped growX layer's transform-origin to the instance frame", async () => {
+    const design: Design = {
+      version: 0,
+      canvas: { width: 400, height: 200, background: "#0d1117" },
+      nodes: [
+        {
+          id: "meter",
+          type: "instance",
+          x: 120, y: 60, w: 200, h: 100,
+          component: "kit/progress-bar",
+          animation: { preset: "growX", durationMs: 700 },
+        } as InstanceNode,
+      ],
+    };
+    const { svg, warnings } = await render(design, {}, loadFontsOrExit());
+    // Fragment nodes' growX was stripped (one composed layer), instance-level kept.
+    expect(warnings).toEqual([
+      'instance "meter": node "fill" animation ignored — an animated instance composes as one layer',
+    ]);
+    // Origin = instance frame's left-center: {x}px {y + h/2}px = 120px 110px.
+    expect(svg).toContain(
+      '<g id="node-meter" class="mib-growX" style="animation-duration:700ms;' +
+        "animation-delay:0ms;animation-iteration-count:1;" +
+        "animation-timing-function:ease-in-out;animation-fill-mode:both;" +
+        'transform-origin:120px 110px">',
+    );
+    expect(svg).not.toContain("transform-box");
+  }, 30000);
 });
 
 describe("expandInstance determinism", () => {
@@ -283,11 +315,30 @@ describe("pipeline integration", () => {
     expect(a.svg).toContain('<g id="node-hero__name" class="mib-slideUp"');
     expect(a.svg).toContain('<g id="node-lang-bar__fill" class="mib-growX"');
     expect(a.svg).toContain('<g id="node-divider__cursor" class="mib-blink"');
-    // The growX fill grows out of its own box: keyframes + fill-box + origin.
+    // The growX fill grows out of its own box: keyframes + a bare class + an
+    // ABSOLUTE per-layer origin (fill-box is gone — a full-canvas satori pass
+    // would inflate the fill-box bbox to the whole canvas).
     expect(a.svg).toContain("@keyframes mib-growX");
-    expect(a.svg).toContain(
-      ".mib-growX{animation-name:mib-growX;transform-box:fill-box;transform-origin:left center}",
-    );
+    expect(a.svg).toContain(".mib-growX{animation-name:mib-growX}");
+    expect(a.svg).not.toContain("transform-box");
+    // Origin computed from the fixture geometry: the lang-bar instance frame
+    // and the progress-bar fill node, through computed-w and scale/offset.
+    {
+      const inst = design.nodes.find((n) => n.id === "lang-bar")! as InstanceNode;
+      const bar = kitRegistry().get("kit/progress-bar")!;
+      const fill = bar.nodes.find((n) => n.id === "fill")!;
+      // growX anchors to LEFT-center, so the computed fill width cannot shift it.
+      const s = Math.min(inst.w / bar.frame.w, inst.h / bar.frame.h);
+      const x = fill.x * s + inst.x;
+      const y = fill.y * s + inst.y;
+      const h = fill.h * s;
+      expect(a.svg).toContain(
+        `<g id="node-lang-bar__fill" class="mib-growX" style="animation-duration:900ms;` +
+          `animation-delay:0ms;animation-iteration-count:1;` +
+          `animation-timing-function:ease-in-out;animation-fill-mode:both;` +
+          `transform-origin:${x}px ${y + h / 2}px">`,
+      );
+    }
     // Only the presets the demo actually uses are emitted.
     expect(a.svg).not.toContain("@keyframes mib-pulse");
     expect(a.svg).not.toContain("@keyframes mib-growY");
@@ -313,8 +364,19 @@ describe("pipeline integration", () => {
     for (const p of ["growX", "growY", "slideUp", "slideLeft", "blink"]) {
       expect(a.svg).toContain(`@keyframes mib-${p}`);
     }
-    expect(a.svg).toContain("transform-origin:left center");
-    expect(a.svg).toContain("transform-origin:center bottom");
+    // Absolute origins from the fixture geometry above:
+    // bar (growX): left-center = 10px, 10 + 8/2 = 14px
+    // col (growY): bottom-center = 10 + 20/2 = 20px, 30 + 80 = 110px
+    expect(a.svg).toContain(";transform-origin:10px 14px");
+    expect(a.svg).toContain(";transform-origin:20px 110px");
+    // slideUp/slideLeft layers are pure translates: no origin on their groups —
+    // the full style attribute ends at animation-fill-mode.
+    expect(a.svg).toContain(
+      '<g id="node-up" class="mib-slideUp" style="animation-duration:800ms;' +
+        'animation-delay:120ms;animation-iteration-count:1;' +
+        'animation-timing-function:ease-in-out;animation-fill-mode:both">',
+    );
+    expect(a.svg).not.toContain("transform-box");
   }, 30000);
 
   it("renders an unknown component as a placeholder with a warning — never fails", async () => {

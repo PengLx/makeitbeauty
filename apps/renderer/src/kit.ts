@@ -532,6 +532,9 @@ export function expandInstance(
             kind: "group",
             id: node.id,
             animation: node.animation,
+            // The layer's transform-origin anchors to the INSTANCE box — the
+            // final canvas-space frame, not the fragment-local one.
+            frame: { x: node.x, y: node.y, w: node.w, h: node.h },
             nodes: generated,
           };
           return { items: [group], warnings };
@@ -586,7 +589,14 @@ export function expandInstance(
   });
 
   if (node.animation) {
-    const group: NodeGroup = { kind: "group", id: node.id, animation: node.animation, nodes };
+    const group: NodeGroup = {
+      kind: "group",
+      id: node.id,
+      animation: node.animation,
+      // Layer origin anchors to the instance box (final canvas-space frame).
+      frame: { x: node.x, y: node.y, w: node.w, h: node.h },
+      nodes,
+    };
     return { items: [group], warnings };
   }
   return { items: nodes, warnings };
