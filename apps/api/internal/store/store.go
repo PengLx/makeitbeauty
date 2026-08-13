@@ -62,14 +62,21 @@ type Output struct {
 // Project owns one design plus its bindings and outputs. Design is kept as raw
 // JSON: the API routes it to the renderer, which owns validation.
 type Project struct {
-	ID        string          `json:"id"`
-	UserID    string          `json:"-"`
-	Name      string          `json:"name"`
-	Design    json.RawMessage `json:"design"`
-	Bindings  []Binding       `json:"bindings"`
-	Outputs   []Output        `json:"outputs"`
-	CreatedAt time.Time       `json:"createdAt"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	ID       string          `json:"id"`
+	UserID   string          `json:"-"`
+	Name     string          `json:"name"`
+	Design   json.RawMessage `json:"design"`
+	Bindings []Binding       `json:"bindings"`
+	Outputs  []Output        `json:"outputs"`
+	// ComponentRefs is the design's community-component references —
+	// unversioned "{owner}/{name}", sorted, deduped, kit/* excluded. Like
+	// Bindings it is DERIVED, never client-authored: httpapi recomputes it
+	// from the design on every project write. It is the base of the usage
+	// metric (architecture.md §8): usage of a component = number of distinct
+	// projects whose ComponentRefs contain it.
+	ComponentRefs []string  `json:"componentRefs,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // DeployToken authorizes pulling rendered output for exactly one project.
@@ -114,6 +121,14 @@ type ComponentVersion struct {
 	PublishedAt time.Time
 }
 
+// Favorite marks that one user favorited one community component
+// (architecture.md §8): at most one row per (user, component) pair.
+type Favorite struct {
+	UserID      string    // User.ID
+	ComponentID string    // Component.ID, "{owner}/{name}"
+	CreatedAt   time.Time // when the favorite was first set (Set keeps it)
+}
+
 // Users persists accounts.
 type Users interface {
 	Create(ctx context.Context, u *User) error
@@ -132,6 +147,10 @@ type Projects interface {
 	Create(ctx context.Context, p *Project) error
 	Get(ctx context.Context, id string) (*Project, error)
 	ListByUser(ctx context.Context, userID string) ([]*Project, error)
+	// List returns every project regardless of owner — the boot-time source
+	// of the community-component usage index, which is rebuilt from all
+	// projects' ComponentRefs on every start (architecture.md §8).
+	List(ctx context.Context) ([]*Project, error)
 	// Update replaces the stored project with p (matched by p.ID).
 	// Returns ErrNotFound if no such project exists.
 	Update(ctx context.Context, p *Project) error
@@ -198,6 +217,28 @@ type ComponentVersions interface {
 	ListByComponent(ctx context.Context, componentID string) ([]*ComponentVersion, error)
 }
 
+// Favorites persists per-user community-component favorites
+// (architecture.md §8). Both writes are idempotent by contract so the API's
+// PUT/DELETE favorite routes can always converge without read-modify-write.
+type Favorites interface {
+	// Set records the favorite. Setting an already-favorited (user,
+	// component) pair is a no-op that keeps the original CreatedAt.
+	Set(ctx context.Context, f *Favorite) error
+	// Unset removes the favorite. Removing an absent pair is a no-op, never
+	// an error.
+	Unset(ctx context.Context, userID, componentID string) error
+	// CountByComponent returns how many users currently favorite a
+	// component; an unknown component counts 0, not an error.
+	CountByComponent(ctx context.Context, componentID string) (int, error)
+	// ListByUser returns all favorites of one user, unordered (presentation
+	// order is the caller's job).
+	ListByUser(ctx context.Context, userID string) ([]*Favorite, error)
+	// IsFavorited reports, for each queried component id, whether the user
+	// currently favorites it — one batched call per browse page, never a
+	// per-row query. Every queried id has an entry in the result.
+	IsFavorited(ctx context.Context, userID string, componentIDs ...string) (map[string]bool, error)
+}
+
 // Stores bundles all persistence interfaces for wiring.
 type Stores struct {
 	Users             Users
@@ -206,4 +247,5 @@ type Stores struct {
 	ConnectorAccounts ConnectorAccounts
 	Components        Components
 	ComponentVersions ComponentVersions
+	Favorites         Favorites
 }

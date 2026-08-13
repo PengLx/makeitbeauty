@@ -74,6 +74,13 @@ type componentView struct {
 	PublishedAt   *time.Time      `json:"publishedAt,omitempty"`
 	Draft         json.RawMessage `json:"draft,omitempty"`
 	Definition    json.RawMessage `json:"definition,omitempty"`
+	// Community enrichments (architecture.md §8), carried by browse and the
+	// favorites list. Pointers so 0/false still serialize on the routes that
+	// set them while every other route omits them entirely. Favorited is
+	// resolved only when the caller has a session; anonymous browse omits it.
+	UsageCount    *int  `json:"usageCount,omitempty"`
+	FavoriteCount *int  `json:"favoriteCount,omitempty"`
+	Favorited     *bool `json:"favorited,omitempty"`
 }
 
 // componentVersionView is the wire shape of one immutable published version.
@@ -515,12 +522,31 @@ func (s *Server) handleUnlistComponent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---- GET /v1/community/components?q=&category= --------------------------------
-// Public browse of published + listed components, newest-published first.
-// q= substring-matches id/title/description; category= is an exact slug match;
-// both compose (AND). Filtering never changes the ordering contract.
+// ---- GET /v1/community/components?q=&category=&sort= ---------------------------
+// Public browse of published + listed components. q= substring-matches
+// id/title/description; category= is an exact slug match; both compose (AND)
+// and never change the ordering contract. sort= picks the ordering — newest
+// (default): latest publish first; uses: usage count (distinct referencing
+// projects) descending; favorites: favorite count descending — and every
+// ordering breaks ties by publishedAt desc, then id. Rows always carry
+// usageCount + favoriteCount; favorited is added only when the caller has a
+// session, resolved best-effort so browse stays public.
 
 func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) {
+	sortKey := r.URL.Query().Get("sort")
+	if sortKey == "" {
+		sortKey = "newest"
+	}
+	switch sortKey {
+	case "newest", "uses", "favorites":
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", `sort must be "newest", "uses", or "favorites"`)
+		return
+	}
+	if err := s.usage.ensure(r.Context(), s.stores.Projects); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "usage index unavailable")
+		return
+	}
 	components, err := s.stores.Components.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "listing components failed")
@@ -535,6 +561,8 @@ func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) 
 	type entry struct {
 		view        componentView
 		publishedAt time.Time
+		uses        int
+		favorites   int
 	}
 	entries := []entry{}
 	for _, c := range components {
@@ -554,12 +582,51 @@ func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "internal", "version lookup failed")
 			return
 		}
+		favoriteCount, err := s.stores.Favorites.CountByComponent(r.Context(), c.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "favorite count failed")
+			return
+		}
+		usageCount := s.usage.get(c.ID)
 		view := publicComponentView(c)
 		view.PublishedAt = &latest.PublishedAt
-		entries = append(entries, entry{view: view, publishedAt: latest.PublishedAt})
+		view.UsageCount = &usageCount
+		view.FavoriteCount = &favoriteCount
+		entries = append(entries, entry{
+			view: view, publishedAt: latest.PublishedAt,
+			uses: usageCount, favorites: favoriteCount,
+		})
+	}
+
+	// favorited: best-effort session resolution — a valid session marks each
+	// row, anonymous browse omits the field entirely (never 401s).
+	if uid, _, ok := s.resolveSession(r); ok && len(entries) > 0 {
+		ids := make([]string, 0, len(entries))
+		for i := range entries {
+			ids = append(ids, entries[i].view.ID)
+		}
+		favorited, err := s.stores.Favorites.IsFavorited(r.Context(), uid, ids...)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "favorite lookup failed")
+			return
+		}
+		for i := range entries {
+			f := favorited[entries[i].view.ID]
+			entries[i].view.Favorited = &f
+		}
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
+		switch sortKey {
+		case "uses":
+			if entries[i].uses != entries[j].uses {
+				return entries[i].uses > entries[j].uses
+			}
+		case "favorites":
+			if entries[i].favorites != entries[j].favorites {
+				return entries[i].favorites > entries[j].favorites
+			}
+		}
 		if !entries[i].publishedAt.Equal(entries[j].publishedAt) {
 			return entries[i].publishedAt.After(entries[j].publishedAt)
 		}
@@ -587,41 +654,32 @@ func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) 
 // image; the Action fails soft). On failure it writes the error envelope and
 // returns ok=false.
 func (s *Server) resolveDesignComponents(w http.ResponseWriter, r *http.Request, design json.RawMessage) ([]json.RawMessage, bool) {
-	var doc struct {
-		Nodes []struct {
-			Type      string `json:"type"`
-			Component string `json:"component"`
-		} `json:"nodes"`
-	}
-	// An unparseable design is the renderer's 422 to raise, not ours.
-	if err := json.Unmarshal(design, &doc); err != nil {
-		return nil, true
-	}
-
+	// An unparseable design yields no refs — it is the renderer's 422 to
+	// raise, not ours.
 	var defs []json.RawMessage
 	seen := map[string]bool{}
-	for _, node := range doc.Nodes {
-		if node.Type != "instance" || strings.HasPrefix(node.Component, "kit/") || seen[node.Component] {
+	for _, ref := range instanceComponents(design) {
+		if strings.HasPrefix(ref, "kit/") || seen[ref] {
 			continue
 		}
-		seen[node.Component] = true
+		seen[ref] = true
 
-		m := pinnedComponentPattern.FindStringSubmatch(node.Component)
+		m := pinnedComponentPattern.FindStringSubmatch(ref)
 		if m == nil {
 			writeError(w, http.StatusUnprocessableEntity, "unknown_component",
-				fmt.Sprintf("component %q is not a pinned community reference ({owner}/{name}@{version})", node.Component))
+				fmt.Sprintf("component %q is not a pinned community reference ({owner}/{name}@{version})", ref))
 			return nil, false
 		}
 		version, err := strconv.Atoi(m[3])
 		if err != nil || version < 1 {
 			writeError(w, http.StatusUnprocessableEntity, "unknown_component",
-				fmt.Sprintf("component %q pins an invalid version", node.Component))
+				fmt.Sprintf("component %q pins an invalid version", ref))
 			return nil, false
 		}
 		frozen, err := s.stores.ComponentVersions.Get(r.Context(), m[1]+"/"+m[2], version)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusUnprocessableEntity, "unknown_component",
-				fmt.Sprintf("component %q does not exist", node.Component))
+				fmt.Sprintf("component %q does not exist", ref))
 			return nil, false
 		}
 		if err != nil {

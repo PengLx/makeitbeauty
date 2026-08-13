@@ -237,7 +237,8 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// Bindings are always derived from the design, never client-authored —
 	// they are the consent record and render-time data filter, so they must
 	// track what the design actually references. Client-sent bindings are
-	// accepted on the wire for compatibility but ignored.
+	// accepted on the wire for compatibility but ignored. ComponentRefs are
+	// derived the same way: they feed the usage metric (architecture.md §8).
 	req.Bindings = s.deriveBindings(req.Design)
 	if len(req.Outputs) == 0 {
 		req.Outputs = []store.Output{{ID: "default", Filename: "card.svg"}}
@@ -249,19 +250,21 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	project := &store.Project{
-		ID:        req.ID,
-		UserID:    userID(r),
-		Name:      req.Name,
-		Design:    req.Design,
-		Bindings:  req.Bindings,
-		Outputs:   req.Outputs,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            req.ID,
+		UserID:        userID(r),
+		Name:          req.Name,
+		Design:        req.Design,
+		Bindings:      req.Bindings,
+		Outputs:       req.Outputs,
+		ComponentRefs: designComponentRefs(req.Design),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := s.stores.Projects.Create(r.Context(), project); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "creating project failed")
 		return
 	}
+	s.usage.apply(nil, project.ComponentRefs)
 	writeJSON(w, http.StatusCreated, project)
 }
 
@@ -287,9 +290,9 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "design is required")
 		return
 	}
-	// Bindings are recomputed from the design on every write (see
-	// handleCreateProject); client-sent bindings are ignored. Omitted
-	// outputs keep their stored values.
+	// Bindings and ComponentRefs are recomputed from the design on every
+	// write (see handleCreateProject); client-sent bindings are ignored.
+	// Omitted outputs keep their stored values.
 	req.Bindings = s.deriveBindings(req.Design)
 	if req.Outputs == nil {
 		req.Outputs = project.Outputs
@@ -299,15 +302,18 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	oldRefs := project.ComponentRefs
 	project.Name = req.Name
 	project.Design = req.Design
 	project.Bindings = req.Bindings
 	project.Outputs = req.Outputs
+	project.ComponentRefs = designComponentRefs(req.Design)
 	project.UpdatedAt = time.Now().UTC()
 	if err := s.stores.Projects.Update(r.Context(), project); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "updating project failed")
 		return
 	}
+	s.usage.apply(oldRefs, project.ComponentRefs)
 	writeJSON(w, http.StatusOK, project)
 }
 
@@ -320,6 +326,8 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "deleting project failed")
 		return
 	}
+	// A deleted project stops referencing everything (usage metric, §8).
+	s.usage.apply(project.ComponentRefs, nil)
 	// Cascade: revoke the project's deploy tokens so a recreated project
 	// with the same id can never be pulled with old credentials.
 	tokens, err := s.stores.DeployTokens.ListByProject(r.Context(), project.ID)

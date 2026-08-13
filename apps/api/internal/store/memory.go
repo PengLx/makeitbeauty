@@ -16,6 +16,7 @@ func NewMemory() Stores {
 		ConnectorAccounts: &memConnectorAccounts{m: map[string]*ConnectorAccount{}},
 		Components:        &memComponents{m: map[string]*Component{}},
 		ComponentVersions: &memComponentVersions{byComponent: map[string][]*ComponentVersion{}},
+		Favorites:         &memFavorites{m: map[string]*Favorite{}},
 	}
 }
 
@@ -102,6 +103,17 @@ func (s *memProjects) ListByUser(_ context.Context, userID string) ([]*Project, 
 			cp := *p
 			out = append(out, &cp)
 		}
+	}
+	return out, nil
+}
+
+func (s *memProjects) List(_ context.Context) ([]*Project, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*Project{}
+	for _, p := range s.m {
+		cp := *p
+		out = append(out, &cp)
 	}
 	return out, nil
 }
@@ -269,6 +281,68 @@ func (s *memComponentVersions) ListByComponent(_ context.Context, componentID st
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, nil
+}
+
+type memFavorites struct {
+	mu sync.RWMutex
+	m  map[string]*Favorite // keyed by userID + "\x00" + componentID
+}
+
+func favoriteKey(userID, componentID string) string { return userID + "\x00" + componentID }
+
+func (s *memFavorites) Set(_ context.Context, f *Favorite) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := favoriteKey(f.UserID, f.ComponentID)
+	if _, ok := s.m[key]; ok {
+		return nil // idempotent: the original CreatedAt stands
+	}
+	cp := *f
+	s.m[key] = &cp
+	return nil
+}
+
+func (s *memFavorites) Unset(_ context.Context, userID, componentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, favoriteKey(userID, componentID)) // idempotent: absent is fine
+	return nil
+}
+
+func (s *memFavorites) CountByComponent(_ context.Context, componentID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, f := range s.m {
+		if f.ComponentID == componentID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *memFavorites) ListByUser(_ context.Context, userID string) ([]*Favorite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*Favorite{}
+	for _, f := range s.m {
+		if f.UserID == userID {
+			cp := *f
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *memFavorites) IsFavorited(_ context.Context, userID string, componentIDs ...string) (map[string]bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]bool, len(componentIDs))
+	for _, id := range componentIDs {
+		_, ok := s.m[favoriteKey(userID, id)]
+		out[id] = ok
+	}
 	return out, nil
 }
 

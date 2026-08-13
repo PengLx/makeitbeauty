@@ -10,6 +10,7 @@
 
 import type { DesignDoc } from "./design";
 import { isComponentDefinition, type ComponentDefinition } from "./component";
+import type { CommunitySort } from "./paletteMenu";
 
 export interface Binding {
   connector: string;
@@ -289,6 +290,14 @@ export interface ComponentRecord {
   draft?: ComponentDefinition | null;
   /** The latest published definition (public once published). */
   definition?: ComponentDefinition | null;
+  /**
+   * Community enrichments (§8): distinct projects referencing the component
+   * and its favorite total. Browse and the favorites list always carry them;
+   * other routes (e.g. GET /v1/components) omit them — absent means "the
+   * route doesn't serve counts", not zero, so views skip rather than show 0.
+   */
+  usageCount?: number;
+  favoriteCount?: number;
 }
 
 /** One community browse hit (GET /v1/community/components). */
@@ -301,6 +310,13 @@ export interface CommunityComponent {
   category?: string;
   latestVersion: number;
   updatedAt?: string;
+  /** Latest publish time — the "newest" ordering key (§8 browse contract). */
+  publishedAt?: string;
+  /** Distinct projects currently referencing the component (§8 usage). */
+  usageCount?: number;
+  favoriteCount?: number;
+  /** Whether the session user favorited it; absent on anonymous browse. */
+  favorited?: boolean;
 }
 
 /**
@@ -342,6 +358,9 @@ function toComponentRecord(body: unknown): ComponentRecord {
     unlisted: raw.unlisted === true,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+    usageCount: typeof raw.usageCount === "number" ? raw.usageCount : undefined,
+    favoriteCount:
+      typeof raw.favoriteCount === "number" ? raw.favoriteCount : undefined,
     draft,
     definition,
   };
@@ -427,39 +446,88 @@ export async function publishComponent(
   return (await getComponent(owner, name)).latestVersion;
 }
 
+/** Normalize one browse/favorites row into a CommunityComponent. */
+function toCommunityComponent(item: unknown): CommunityComponent {
+  const record = toComponentRecord(item);
+  const raw = (item ?? {}) as Record<string, unknown>;
+  return {
+    id: record.id,
+    owner:
+      typeof raw.owner === "string" ? raw.owner : record.id.split("/")[0] ?? "",
+    title: record.title,
+    description: record.description,
+    category: record.category,
+    latestVersion: record.latestVersion,
+    updatedAt: record.updatedAt,
+    publishedAt:
+      typeof raw.publishedAt === "string" ? raw.publishedAt : undefined,
+    usageCount: record.usageCount,
+    favoriteCount: record.favoriteCount,
+    favorited: typeof raw.favorited === "boolean" ? raw.favorited : undefined,
+  };
+}
+
 /**
- * GET /v1/community/components?q=&category= — published components, newest
- * first (public). `q` substring-matches id/title/description server-side;
- * `category` is an exact slug facet; they compose (AND).
+ * GET /v1/community/components?q=&category=&sort= — published components
+ * (public). `q` substring-matches id/title/description server-side;
+ * `category` is an exact slug facet; both compose (AND). `sort` picks the
+ * ordering — newest (default) | uses | favorites; the default is omitted
+ * from the URL so cached/logged requests stay canonical.
  */
 export async function listCommunity(
   q: string,
   category?: string,
+  sort?: CommunitySort,
   signal?: AbortSignal,
 ): Promise<CommunityComponent[]> {
   const params = new URLSearchParams();
   if (q.trim() !== "") params.set("q", q.trim());
   if (category) params.set("category", category);
+  if (sort && sort !== "newest") params.set("sort", sort);
   const qs = params.toString();
   const body = await request<{ components?: unknown[] } | unknown[]>(
     `/v1/community/components${qs === "" ? "" : `?${qs}`}`,
     { signal },
   );
   const items = Array.isArray(body) ? body : (body.components ?? []);
-  return items.map((item) => {
-    const record = toComponentRecord(item);
-    const raw = (item ?? {}) as Record<string, unknown>;
-    return {
-      id: record.id,
-      owner:
-        typeof raw.owner === "string" ? raw.owner : record.id.split("/")[0] ?? "",
-      title: record.title,
-      description: record.description,
-      category: record.category,
-      latestVersion: record.latestVersion,
-      updatedAt: record.updatedAt,
-    };
-  });
+  return items.map(toCommunityComponent);
+}
+
+// ---- favorites (architecture §8) -----------------------------------------
+
+/**
+ * PUT /v1/components/{owner}/{name}/favorite — idempotent 204 (session).
+ * 404 covers unknown, never-published, and unlisted-to-non-owners alike.
+ */
+export function favoriteComponent(owner: string, name: string): Promise<void> {
+  return send("PUT", componentPath(owner, name, "/favorite"));
+}
+
+/**
+ * DELETE /v1/components/{owner}/{name}/favorite — idempotent and
+ * component-blind 204: "not favorited" is always reachable.
+ */
+export function unfavoriteComponent(
+  owner: string,
+  name: string,
+): Promise<void> {
+  return send("DELETE", componentPath(owner, name, "/favorite"));
+}
+
+/**
+ * GET /v1/components/favorites — the session user's favorited components as
+ * published metadata with counts, newest favorite first. Vanished components
+ * are skipped server-side; every row carries favorited: true.
+ */
+export async function listFavoriteComponents(
+  signal?: AbortSignal,
+): Promise<CommunityComponent[]> {
+  const body = await request<{ components?: unknown[] } | unknown[]>(
+    "/v1/components/favorites",
+    { signal },
+  );
+  const items = Array.isArray(body) ? body : (body.components ?? []);
+  return items.map(toCommunityComponent);
 }
 
 /**

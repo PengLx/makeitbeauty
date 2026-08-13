@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
+  Heart,
   Loader2,
   RefreshCw,
   Search,
@@ -11,26 +12,37 @@ import type { KitComponent, KitState } from "@/hooks/useKit";
 import type { MyComponentsState } from "@/hooks/useMyComponents";
 import { getComponentVersionCached } from "@/hooks/useComponentDefs";
 import {
+  favoriteComponent,
   listCommunity,
+  listFavoriteComponents,
   toApiError,
+  unfavoriteComponent,
   type ApiError,
   type CommunityComponent,
 } from "@/lib/api";
-import type { ComponentDefinition } from "@/lib/component";
+import { splitComponentId, type ComponentDefinition } from "@/lib/component";
+import {
+  applyFavorite,
+  filterFavoriteRows,
+  sortFavoriteRows,
+} from "@/lib/favorites";
 import {
   buildInstancePreviewDesign,
   materializeDefaultProps,
   pinnedPreviewKey,
 } from "@/lib/hoverPreview";
 import {
+  DEFAULT_COMMUNITY_SORT,
   PALETTE_STORAGE_KEY,
   buildKitMenu,
   categoryLabel,
   isGroupOpen,
   matchesQuery,
+  mergePalettePrefs,
   normalizeQuery,
   parsePalettePrefs,
-  serializePalettePrefs,
+  parsePaletteSort,
+  type CommunitySort,
   type PaletteGroup,
 } from "@/lib/paletteMenu";
 import { cn } from "@/lib/utils";
@@ -44,6 +56,13 @@ import {
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 
 interface Props {
@@ -67,6 +86,30 @@ function loadCollapsed(): Set<string> {
     return parsePalettePrefs(localStorage.getItem(PALETTE_STORAGE_KEY));
   } catch {
     return new Set();
+  }
+}
+
+/** Community sort pref from "mib.palette"; unavailable storage = newest. */
+function loadSort(): CommunitySort {
+  try {
+    return parsePaletteSort(localStorage.getItem(PALETTE_STORAGE_KEY));
+  } catch {
+    return DEFAULT_COMMUNITY_SORT;
+  }
+}
+
+/** Merge one pref into "mib.palette" without clobbering the others. */
+function storePrefs(patch: {
+  collapsed?: ReadonlySet<string>;
+  sort?: CommunitySort;
+}) {
+  try {
+    localStorage.setItem(
+      PALETTE_STORAGE_KEY,
+      mergePalettePrefs(localStorage.getItem(PALETTE_STORAGE_KEY), patch),
+    );
+  } catch {
+    /* private mode / quota — the in-memory state still applies */
   }
 }
 
@@ -99,14 +142,23 @@ export function Palette({
       const next = new Set(prev);
       if (next.has(category)) next.delete(category);
       else next.add(category);
-      try {
-        localStorage.setItem(PALETTE_STORAGE_KEY, serializePalettePrefs(next));
-      } catch {
-        /* private mode / quota — the in-memory state still applies */
-      }
+      storePrefs({ collapsed: next });
       return next;
     });
   }
+
+  // Persisted community sort (§8 browse orderings), applied server-side on
+  // browse and client-side on the Favorites view.
+  const [sort, setSort] = useState<CommunitySort>(loadSort);
+  function changeSort(next: CommunitySort) {
+    setSort(next);
+    storePrefs({ sort: next });
+  }
+
+  // The palette's session signal: "My components" 401 means signed out —
+  // favorites (hearts, the Favorites filter) need a session too. The dev
+  // implicit user has a session, so it counts as signed in.
+  const signedIn = my.error?.status !== 401;
 
   const kitGroups = buildKitMenu(kit.components, normalized);
   const myPublished = (my.components ?? []).filter((c) => c.latestVersion > 0);
@@ -130,8 +182,8 @@ export function Palette({
           Rectangle
         </Button>
       </div>
-      <div className="px-3 pb-3">
-        <div className="relative">
+      <div className="flex items-center gap-2 px-3 pb-3">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -142,6 +194,30 @@ export function Palette({
             aria-label="Search kit, my, and community components"
           />
         </div>
+        {/* Community ordering, persisted in "mib.palette". Sits beside the
+            search box because the two compose: q narrows, sort ranks. */}
+        <Select
+          value={sort}
+          onValueChange={(v) => changeSort(v as CommunitySort)}
+        >
+          <SelectTrigger
+            className="shrink-0 text-xs"
+            aria-label="Sort community components"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper" align="end">
+            <SelectItem value="newest" className="text-xs">
+              Newest
+            </SelectItem>
+            <SelectItem value="uses" className="text-xs">
+              Most used
+            </SelectItem>
+            <SelectItem value="favorites" className="text-xs">
+              Most favorited
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Separator />
@@ -232,7 +308,12 @@ export function Palette({
           )}
         </div>
 
-        <CommunitySection query={query} onInsert={onInsertUserInstance} />
+        <CommunitySection
+          query={query}
+          sort={sort}
+          signedIn={signedIn}
+          onInsert={onInsertUserInstance}
+        />
       </ScrollArea>
 
       <Separator />
@@ -332,29 +413,50 @@ function KitCategoryGroup({
 }
 
 /**
- * Community browse per §8: GET /v1/community/components?q=&category=
- * (published, newest first). `query` is the palette's single search box —
- * typing debounces the server call; mount, retry, and category-facet clicks
- * fire immediately. Clicking any result's category chip filters to that
- * slug; clicking it again (or the active chip beside the heading) clears.
+ * Community browse per §8: GET /v1/community/components?q=&category=&sort=.
+ * `query` is the palette's single search box — typing debounces the server
+ * call; mount, retry, sort, and category-facet clicks fire immediately.
+ * Clicking any result's category chip filters to that slug; clicking it
+ * again (or the active chip beside the heading) clears.
+ *
+ * The Favorites chip swaps the feed for GET /v1/components/favorites — one
+ * fetch, then q/category/sort apply CLIENT-side (lib/favorites.ts mirrors
+ * the server's matching rules), so typing never re-hits the server there.
+ * Hearts flip optimistically and roll back on error; in Favorites view an
+ * unfavorited row stays visible (heart hollow) until the next fetch so the
+ * flip is undoable in place — no layout jump, no lost row.
  */
 function CommunitySection({
   query,
+  sort,
+  signedIn,
   onInsert,
 }: {
   query: string;
+  sort: CommunitySort;
+  signedIn: boolean;
   onInsert: (ref: string, def: ComponentDefinition) => void;
 }) {
   const [category, setCategory] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [results, setResults] = useState<CommunityComponent[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  /** Ids with a favorite write in flight — their hearts are disabled. */
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
   /** Last query this effect ran with — an unchanged query means the rerun
-   * came from a click (facet/retry), which shouldn't wait out a debounce. */
+   * came from a click (facet/retry/sort/favorites), which shouldn't wait
+   * out a debounce. */
   const lastQuery = useRef<string | null>(null);
 
+  // Browse fetch — inert while the Favorites view is active (but the query
+  // ref stays current so switching back never waits out a stale debounce).
   useEffect(() => {
+    if (favoritesOnly) {
+      lastQuery.current = query;
+      return;
+    }
     const controller = new AbortController();
     const delay = lastQuery.current === query || lastQuery.current === null ? 0 : 350;
     lastQuery.current = query;
@@ -362,7 +464,7 @@ function CommunitySection({
       setLoading(true);
       try {
         setResults(
-          await listCommunity(query, category ?? undefined, controller.signal),
+          await listCommunity(query, category ?? undefined, sort, controller.signal),
         );
         setError(null);
       } catch (e) {
@@ -376,13 +478,68 @@ function CommunitySection({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, category, attempt]);
+  }, [query, category, sort, attempt, favoritesOnly]);
+
+  // Favorites fetch — one call per activation/retry; q/category/sort apply
+  // client-side below, so typing never re-hits the server here.
+  useEffect(() => {
+    if (!favoritesOnly) return;
+    const controller = new AbortController();
+    setLoading(true);
+    (async () => {
+      try {
+        setResults(await listFavoriteComponents(controller.signal));
+        setError(null);
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        setError(toApiError(e));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [favoritesOnly, attempt]);
 
   function toggleCategory(slug: string) {
     setCategory((prev) => (prev === slug ? null : slug));
   }
 
+  /**
+   * Optimistic heart flip: paint the target state, then converge with the
+   * idempotent PUT/DELETE; roll the exact flip back if the write fails.
+   */
+  async function toggleFavorite(id: string, next: boolean) {
+    const target = splitComponentId(id);
+    if (!target || pendingIds.has(id)) return;
+    setPendingIds((prev) => new Set(prev).add(id));
+    setResults((prev) => (prev ? applyFavorite(prev, id, next) : prev));
+    try {
+      if (next) await favoriteComponent(target.owner, target.name);
+      else await unfavoriteComponent(target.owner, target.name);
+    } catch {
+      setResults((prev) => (prev ? applyFavorite(prev, id, !next) : prev));
+    } finally {
+      setPendingIds((prev) => {
+        const rest = new Set(prev);
+        rest.delete(id);
+        return rest;
+      });
+    }
+  }
+
   const trimmed = query.trim();
+  const normalized = normalizeQuery(query);
+  // Favorites view composes q + category + sort client-side; browse rows
+  // arrive already filtered and ordered by the server.
+  const rows =
+    results == null
+      ? null
+      : favoritesOnly
+        ? sortFavoriteRows(
+            filterFavoriteRows(results, normalized, category),
+            sort,
+          )
+        : results;
 
   return (
     <>
@@ -390,21 +547,52 @@ function CommunitySection({
         <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Community
         </h2>
-        {/* The facet's obvious "on" indicator — visible even when the
-            filtered result list is empty, and a one-click clear. */}
-        {category && (
-          <CategoryChip
-            category={category}
-            active
-            onToggle={() => setCategory(null)}
-          />
-        )}
+        <div className="flex min-w-0 items-center gap-1.5">
+          {/* The facet's obvious "on" indicator — visible even when the
+              filtered result list is empty, and a one-click clear. */}
+          {category && (
+            <CategoryChip
+              category={category}
+              active
+              onToggle={() => setCategory(null)}
+            />
+          )}
+          {/* Favorites filter: swaps browse for the personal favorites
+              list. Needs a session, like the hearts it collects. */}
+          {signedIn && (
+            <button
+              type="button"
+              aria-pressed={favoritesOnly}
+              title={
+                favoritesOnly
+                  ? "Show all community components"
+                  : "Show only components you favorited"
+              }
+              onClick={() => setFavoritesOnly((prev) => !prev)}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px font-mono text-[10px] leading-4",
+                "transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                favoritesOnly
+                  ? "border-rose-500 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
+                  : "text-muted-foreground hover:border-ring hover:text-foreground",
+              )}
+            >
+              <Heart
+                aria-hidden
+                className={cn("size-2.5", favoritesOnly && "fill-current")}
+              />
+              Favorites
+            </button>
+          )}
+        </div>
       </div>
       <div className="space-y-2 px-3 pb-3">
         {error ? (
           <div className="space-y-2 rounded-lg border border-dashed p-3">
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Community search unavailable.
+              {favoritesOnly
+                ? "Favorites unavailable."
+                : "Community search unavailable."}
             </p>
             <Button
               variant="secondary"
@@ -415,21 +603,25 @@ function CommunitySection({
               Retry
             </Button>
           </div>
-        ) : results == null || loading ? (
+        ) : rows == null || loading ? (
           <p className="px-1 py-1 text-xs text-muted-foreground">Searching…</p>
-        ) : results.length === 0 ? (
+        ) : rows.length === 0 ? (
           <p className="px-1 py-1 text-[11px] leading-relaxed text-muted-foreground">
-            {trimmed === "" && category == null
-              ? "No published community components yet."
-              : category != null && trimmed !== ""
-                ? `Nothing in “${category}” matches “${trimmed}”.`
-                : category != null
-                  ? `Nothing published in “${category}” yet.`
-                  : `Nothing matches “${trimmed}”.`}
+            {favoritesOnly
+              ? results != null && results.length > 0
+                ? "None of your favorites match."
+                : "No favorites yet — tap the heart on any community card."
+              : trimmed === "" && category == null
+                ? "No published community components yet."
+                : category != null && trimmed !== ""
+                  ? `Nothing in “${category}” matches “${trimmed}”.`
+                  : category != null
+                    ? `Nothing published in “${category}” yet.`
+                    : `Nothing matches “${trimmed}”.`}
           </p>
         ) : (
           <ul className="space-y-1.5">
-            {results
+            {rows
               .filter((c) => c.latestVersion > 0)
               .map((c) => (
                 <li key={c.id}>
@@ -441,6 +633,15 @@ function CommunitySection({
                     category={c.category}
                     activeCategory={category}
                     onCategoryToggle={toggleCategory}
+                    usageCount={c.usageCount}
+                    favoriteCount={c.favoriteCount}
+                    favorited={c.favorited === true}
+                    favoritePending={pendingIds.has(c.id)}
+                    onToggleFavorite={
+                      signedIn
+                        ? (next) => void toggleFavorite(c.id, next)
+                        : undefined
+                    }
                     onInsert={onInsert}
                   />
                 </li>
@@ -461,7 +662,10 @@ function CommunitySection({
  * The category chip is display-only on my-components rows; community rows
  * pass onCategoryToggle, which renders it as a SIBLING button below the
  * insert button (never nested — a button inside a button is invalid), wired
- * as the browse category facet.
+ * as the browse category facet. Community rows also carry the §8 counts row
+ * (♥ N · used in N projects) with the heart as the favorite toggle — again a
+ * sibling of the insert button, in the same footer row so toggling never
+ * changes the card's height.
  */
 function UserComponentCard({
   id,
@@ -471,6 +675,11 @@ function UserComponentCard({
   category,
   activeCategory,
   onCategoryToggle,
+  usageCount,
+  favoriteCount,
+  favorited = false,
+  favoritePending = false,
+  onToggleFavorite,
   onInsert,
 }: {
   id: string;
@@ -481,12 +690,22 @@ function UserComponentCard({
   /** Currently-active community facet (chip active state). */
   activeCategory?: string | null;
   onCategoryToggle?: (category: string) => void;
+  /** §8 community counts; absent (my-components rows) hides the counts row. */
+  usageCount?: number;
+  favoriteCount?: number;
+  favorited?: boolean;
+  /** Favorite write in flight — the heart is disabled, never mid-flipped. */
+  favoritePending?: boolean;
+  /** Absent = signed out: the heart renders as a static count, not a toggle. */
+  onToggleFavorite?: (next: boolean) => void;
   onInsert: (ref: string, def: ComponentDefinition) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = `${id}@${version}`;
   const facetChip = category != null && onCategoryToggle != null;
+  const countsRow = usageCount !== undefined || favoriteCount !== undefined;
+  const footer = facetChip || countsRow;
 
   async function insert() {
     if (busy) return;
@@ -525,7 +744,7 @@ function UserComponentCard({
           className={cn(
             "w-full px-3 py-2 text-left transition-colors hover:bg-muted",
             "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
-            facetChip ? "rounded-t-lg" : "rounded-lg",
+            footer ? "rounded-t-lg" : "rounded-lg",
           )}
         >
           <div className="flex items-baseline justify-between gap-2">
@@ -547,13 +766,54 @@ function UserComponentCard({
           </div>
           {error && <div className="mt-1 text-[10px] text-destructive">{error}</div>}
         </button>
-        {facetChip && (
-          <div className="flex px-3 pb-2">
-            <CategoryChip
-              category={category}
-              active={category === activeCategory}
-              onToggle={() => onCategoryToggle(category)}
-            />
+        {footer && (
+          <div className="flex min-w-0 items-center gap-2 px-3 pb-2">
+            {facetChip && (
+              <CategoryChip
+                category={category}
+                active={category === activeCategory}
+                onToggle={() => onCategoryToggle(category)}
+              />
+            )}
+            {countsRow && (
+              <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums text-muted-foreground">
+                {onToggleFavorite ? (
+                  <button
+                    type="button"
+                    aria-pressed={favorited}
+                    aria-label={
+                      favorited
+                        ? `Remove ${title} from favorites`
+                        : `Favorite ${title}`
+                    }
+                    title={favorited ? "Remove favorite" : "Favorite"}
+                    disabled={favoritePending}
+                    onClick={() => onToggleFavorite(!favorited)}
+                    className={cn(
+                      "-m-1 rounded-md p-1 transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
+                      favorited
+                        ? "text-rose-500 hover:text-rose-400"
+                        : "hover:text-foreground",
+                    )}
+                  >
+                    <Heart
+                      aria-hidden
+                      className={cn("size-3", favorited && "fill-current")}
+                    />
+                  </button>
+                ) : (
+                  // Signed out: counts stay visible, the toggle doesn't.
+                  <Heart aria-hidden className="size-3" />
+                )}
+                <span>{favoriteCount ?? 0}</span>
+                {(usageCount ?? 0) > 0 && (
+                  <span>
+                    · used in {usageCount}{" "}
+                    {usageCount === 1 ? "project" : "projects"}
+                  </span>
+                )}
+              </span>
+            )}
           </div>
         )}
       </div>

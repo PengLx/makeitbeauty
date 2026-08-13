@@ -14,7 +14,7 @@ import (
 
 // NewFile returns Stores backed by one JSON file per entity collection under
 // dir (users.json, projects.json, deploy_tokens.json, connector_accounts.json,
-// components.json, component_versions.json).
+// components.json, component_versions.json, favorites.json).
 // The directory is created on demand (0700), existing files are loaded on
 // boot, and every mutation rewrites the affected collection atomically
 // (temp file + rename), so a crash mid-write never corrupts data. This makes
@@ -32,6 +32,7 @@ func NewFile(dir string) (Stores, error) {
 		accounts:   map[string]*ConnectorAccount{},
 		components: map[string]*Component{},
 		versions:   map[string][]*ComponentVersion{},
+		favorites:  map[string]*Favorite{},
 	}
 	if err := db.load(); err != nil {
 		return Stores{}, err
@@ -43,6 +44,7 @@ func NewFile(dir string) (Stores, error) {
 		ConnectorAccounts: &fileConnectorAccounts{db},
 		Components:        &fileComponents{db},
 		ComponentVersions: &fileComponentVersions{db},
+		Favorites:         &fileFavorites{db},
 	}, nil
 }
 
@@ -59,17 +61,19 @@ const (
 	accountsFile   = "connector_accounts.json"
 	componentsFile = "components.json"
 	versionsFile   = "component_versions.json"
+	favoritesFile  = "favorites.json"
 )
 
 type projectRecord struct {
-	ID        string          `json:"id"`
-	UserID    string          `json:"userId"`
-	Name      string          `json:"name"`
-	Design    json.RawMessage `json:"design"`
-	Bindings  []Binding       `json:"bindings"`
-	Outputs   []Output        `json:"outputs"`
-	CreatedAt time.Time       `json:"createdAt"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	ID            string          `json:"id"`
+	UserID        string          `json:"userId"`
+	Name          string          `json:"name"`
+	Design        json.RawMessage `json:"design"`
+	Bindings      []Binding       `json:"bindings"`
+	Outputs       []Output        `json:"outputs"`
+	ComponentRefs []string        `json:"componentRefs,omitempty"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
 type tokenRecord struct {
@@ -109,6 +113,12 @@ type componentVersionRecord struct {
 	PublishedAt time.Time       `json:"publishedAt"`
 }
 
+type favoriteRecord struct {
+	UserID      string    `json:"userId"`
+	ComponentID string    `json:"componentId"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 // ---- shared database ----------------------------------------------------
 
 // fileDB holds all collections in memory under one mutex; files are the
@@ -122,6 +132,7 @@ type fileDB struct {
 	accounts   map[string]*ConnectorAccount
 	components map[string]*Component
 	versions   map[string][]*ComponentVersion // keyed by componentID
+	favorites  map[string]*Favorite           // keyed by userID + "\x00" + componentID
 }
 
 func (db *fileDB) load() error {
@@ -140,7 +151,7 @@ func (db *fileDB) load() error {
 	for _, rec := range projects {
 		db.projects[rec.ID] = &Project{
 			ID: rec.ID, UserID: rec.UserID, Name: rec.Name, Design: rec.Design,
-			Bindings: rec.Bindings, Outputs: rec.Outputs,
+			Bindings: rec.Bindings, Outputs: rec.Outputs, ComponentRefs: rec.ComponentRefs,
 			CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 		}
 	}
@@ -193,6 +204,16 @@ func (db *fileDB) load() error {
 			ComponentID: rec.ComponentID, Version: rec.Version,
 			Definition: rec.Definition, PublishedAt: rec.PublishedAt,
 		})
+	}
+
+	var favorites []favoriteRecord
+	if err := db.readFile(favoritesFile, &favorites); err != nil {
+		return err
+	}
+	for _, rec := range favorites {
+		db.favorites[favoriteKey(rec.UserID, rec.ComponentID)] = &Favorite{
+			UserID: rec.UserID, ComponentID: rec.ComponentID, CreatedAt: rec.CreatedAt,
+		}
 	}
 	return nil
 }
@@ -266,7 +287,7 @@ func (db *fileDB) persistProjects() error {
 	for _, p := range db.projects {
 		out = append(out, projectRecord{
 			ID: p.ID, UserID: p.UserID, Name: p.Name, Design: p.Design,
-			Bindings: p.Bindings, Outputs: p.Outputs,
+			Bindings: p.Bindings, Outputs: p.Outputs, ComponentRefs: p.ComponentRefs,
 			CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 		})
 	}
@@ -324,6 +345,22 @@ func (db *fileDB) persistVersions() error {
 		return out[i].Version < out[j].Version
 	})
 	return db.writeFile(versionsFile, out)
+}
+
+func (db *fileDB) persistFavorites() error {
+	out := make([]favoriteRecord, 0, len(db.favorites))
+	for _, f := range db.favorites {
+		out = append(out, favoriteRecord{
+			UserID: f.UserID, ComponentID: f.ComponentID, CreatedAt: f.CreatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UserID != out[j].UserID {
+			return out[i].UserID < out[j].UserID
+		}
+		return out[i].ComponentID < out[j].ComponentID
+	})
+	return db.writeFile(favoritesFile, out)
 }
 
 func (db *fileDB) persistAccounts() error {
@@ -418,6 +455,17 @@ func (s *fileProjects) ListByUser(_ context.Context, userID string) ([]*Project,
 			cp := *p
 			out = append(out, &cp)
 		}
+	}
+	return out, nil
+}
+
+func (s *fileProjects) List(_ context.Context) ([]*Project, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	out := []*Project{}
+	for _, p := range s.db.projects {
+		cp := *p
+		out = append(out, &cp)
 	}
 	return out, nil
 }
@@ -577,6 +625,67 @@ func (s *fileComponentVersions) ListByComponent(_ context.Context, componentID s
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, nil
+}
+
+type fileFavorites struct{ db *fileDB }
+
+func (s *fileFavorites) Set(_ context.Context, f *Favorite) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	key := favoriteKey(f.UserID, f.ComponentID)
+	if _, ok := s.db.favorites[key]; ok {
+		return nil // idempotent: the original CreatedAt stands, no rewrite
+	}
+	cp := *f
+	s.db.favorites[key] = &cp
+	return s.db.persistFavorites()
+}
+
+func (s *fileFavorites) Unset(_ context.Context, userID, componentID string) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	key := favoriteKey(userID, componentID)
+	if _, ok := s.db.favorites[key]; !ok {
+		return nil // idempotent: absent is fine, no rewrite
+	}
+	delete(s.db.favorites, key)
+	return s.db.persistFavorites()
+}
+
+func (s *fileFavorites) CountByComponent(_ context.Context, componentID string) (int, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	n := 0
+	for _, f := range s.db.favorites {
+		if f.ComponentID == componentID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fileFavorites) ListByUser(_ context.Context, userID string) ([]*Favorite, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	out := []*Favorite{}
+	for _, f := range s.db.favorites {
+		if f.UserID == userID {
+			cp := *f
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *fileFavorites) IsFavorited(_ context.Context, userID string, componentIDs ...string) (map[string]bool, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	out := make(map[string]bool, len(componentIDs))
+	for _, id := range componentIDs {
+		_, ok := s.db.favorites[favoriteKey(userID, id)]
+		out[id] = ok
+	}
 	return out, nil
 }
 

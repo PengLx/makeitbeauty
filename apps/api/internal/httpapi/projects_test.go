@@ -31,14 +31,22 @@ func (fakeGitHub) Fetch(context.Context, *store.ConnectorAccount) (map[string]an
 // renderer stays nil because these tests never render.
 func newTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
+	return newTestServerWith(t, store.NewMemory())
+}
+
+// newTestServerWith is newTestServer over caller-provided stores (e.g. a
+// file store, for restart-rebuild tests).
+func newTestServerWith(t *testing.T, stores store.Stores) (*Server, http.Handler) {
+	t.Helper()
 	log := slog.New(slog.DiscardHandler)
 	registry := connector.NewRegistry()
 	registry.Register(fakeGitHub{})
 	s := &Server{
 		cfg:    config.Config{Env: "dev"},
 		log:    log,
-		stores: store.NewMemory(),
+		stores: stores,
 		cache:  connector.NewSnapshotCache(registry, log),
+		usage:  newUsageIndex(),
 	}
 	return s, s.Handler()
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_COMMUNITY_SORT,
   KIT_CATEGORIES,
   OTHER_CATEGORY,
   buildKitMenu,
@@ -9,8 +10,10 @@ import {
   isKnownCategory,
   matchesQuery,
   menuCategory,
+  mergePalettePrefs,
   normalizeQuery,
   parsePalettePrefs,
+  parsePaletteSort,
   serializePalettePrefs,
 } from "./paletteMenu";
 
@@ -158,6 +161,65 @@ describe("palette prefs (mib.palette)", () => {
   it("drops non-string entries but keeps valid ones", () => {
     expect(parsePalettePrefs('{"collapsed":["stats",7,null,"decor"]}')).toEqual(
       new Set(["stats", "decor"]),
+    );
+  });
+});
+
+describe("community sort pref (mib.palette)", () => {
+  it("round-trips every non-default sort through merge/parse", () => {
+    expect(parsePaletteSort(mergePalettePrefs(null, { sort: "uses" }))).toBe(
+      "uses",
+    );
+    expect(
+      parsePaletteSort(mergePalettePrefs(null, { sort: "favorites" })),
+    ).toBe("favorites");
+  });
+
+  it('the default ("newest") is omitted from storage and parses back', () => {
+    const raw = mergePalettePrefs('{"sort":"uses"}', { sort: "newest" });
+    expect(raw).toBe("{}");
+    expect(parsePaletteSort(raw)).toBe(DEFAULT_COMMUNITY_SORT);
+  });
+
+  it("absent, unknown, and malformed values degrade to newest", () => {
+    expect(parsePaletteSort(null)).toBe("newest");
+    expect(parsePaletteSort("{}")).toBe("newest");
+    expect(parsePaletteSort('{"sort":"loudest"}')).toBe("newest");
+    expect(parsePaletteSort('{"sort":7}')).toBe("newest");
+    expect(parsePaletteSort("not json")).toBe("newest");
+  });
+
+  it("writing the collapsed set preserves the stored sort (and vice versa)", () => {
+    let raw = mergePalettePrefs(null, { sort: "favorites" });
+    raw = mergePalettePrefs(raw, { collapsed: new Set(["stats", "data"]) });
+    expect(parsePaletteSort(raw)).toBe("favorites");
+    expect(parsePalettePrefs(raw)).toEqual(new Set(["stats", "data"]));
+
+    raw = mergePalettePrefs(raw, { sort: "uses" });
+    expect(parsePalettePrefs(raw)).toEqual(new Set(["stats", "data"]));
+    expect(parsePaletteSort(raw)).toBe("uses");
+  });
+
+  it("an emptied collapsed set serializes away", () => {
+    const raw = mergePalettePrefs('{"collapsed":["stats"],"sort":"uses"}', {
+      collapsed: new Set(),
+    });
+    expect(raw).toBe('{"sort":"uses"}');
+  });
+
+  it("preserves unknown future keys instead of clobbering them", () => {
+    const raw = mergePalettePrefs('{"collapsed":["decor"],"zoom":2}', {
+      sort: "uses",
+    });
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    expect(parsed.zoom).toBe(2);
+    expect(parsed.collapsed).toEqual(["decor"]);
+    expect(parsed.sort).toBe("uses");
+  });
+
+  it("merging onto a corrupt payload starts clean", () => {
+    expect(mergePalettePrefs("not json", { sort: "uses" })).toBe(
+      '{"sort":"uses"}',
     );
   });
 });

@@ -259,9 +259,26 @@ with KMS-managed keys (see SECURITY.md).
   latest published definition (public when published);
   `GET /v1/components/{owner}/{name}/versions/{n}` immutable definition (public);
   `DELETE /v1/components/{owner}/{name}` unlist (owner);
-  `GET /v1/community/components?q=&category=` browse published, newest first
+  `GET /v1/community/components?q=&category=&sort=` browse published
   (public; q searches id/title/description, category is an exact-slug filter,
-  both compose).
+  both compose; `sort` = `newest` (default) | `uses` | `favorites`, invalid →
+  400; every ordering breaks ties by publishedAt desc, then id). Rows always
+  carry `usageCount` and `favoriteCount`, plus `favorited` when the caller
+  has a session (resolved best-effort — browse stays public).
+  Favorites: `PUT /v1/components/{owner}/{name}/favorite` (session; requires
+  ≥1 published version — drafts/unknown/unlisted-to-non-owners are the same
+  404; idempotent 204); `DELETE /v1/components/{owner}/{name}/favorite`
+  (idempotent 204); `GET /v1/components/favorites` (session) → the caller's
+  favorited components' published metadata, newest favorite first (vanished
+  components are skipped).
+  Usage = the number of DISTINCT projects currently referencing a component
+  at any pinned version — honest and unfakeable. Each Project persists
+  `componentRefs` (unversioned `{owner}/{name}`, sorted, deduped, `kit/*`
+  excluded), recomputed server-side from the design on every write like
+  bindings; the counters live in an in-memory index rebuilt from those refs
+  at boot — O(projects), once — and maintained from ref diffs on project
+  create/update/delete. Chosen over a persisted usage store deliberately:
+  zero new persistence, and any drift self-heals on restart.
 - Auth (GitHub App user OAuth): `GET /v1/auth/github/login` → 302 to GitHub
   authorize (CSRF `state` in a short-lived cookie); `GET /v1/auth/github/callback`
   → code exchange (user token, 8h + refresh), upsert user, provision the GitHub

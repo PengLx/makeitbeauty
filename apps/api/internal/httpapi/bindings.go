@@ -20,6 +20,30 @@ var templatePattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]
 // GitHub data and predates the qualifier, so absence means github.
 const defaultNativeConnector = "github"
 
+// instanceComponents returns the component reference of every instance node
+// in a design, in document order, duplicates and empties included — the one
+// shared parse behind binding derivation (kit fragments, native dataFields),
+// render-path component resolution, and ComponentRefs/usage derivation.
+// An unparseable design yields nil: schema validation is the renderer's job.
+func instanceComponents(design json.RawMessage) []string {
+	var doc struct {
+		Nodes []struct {
+			Type      string `json:"type"`
+			Component string `json:"component"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(design, &doc); err != nil {
+		return nil
+	}
+	var refs []string
+	for _, node := range doc.Nodes {
+		if node.Type == "instance" {
+			refs = append(refs, node.Component)
+		}
+	}
+	return refs
+}
+
 // deriveBindings scans a design for {{connector.field}} templates and returns
 // the bindings the design actually consumes. Bindings are derived, never
 // client-authored: they are the consent record ("this image will publicly
@@ -112,23 +136,13 @@ func kitFragmentFields(design json.RawMessage, kitComponents []kit.Component, kn
 		return
 	}
 
-	var doc struct {
-		Nodes []struct {
-			Type      string `json:"type"`
-			Component string `json:"component"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal(design, &doc); err != nil {
-		return
-	}
-
 	scanned := map[string]bool{}
-	for _, node := range doc.Nodes {
-		if node.Type != "instance" || scanned[node.Component] {
+	for _, ref := range instanceComponents(design) {
+		if scanned[ref] {
 			continue
 		}
-		scanned[node.Component] = true
-		nodes, ok := fragments[node.Component]
+		scanned[ref] = true
+		nodes, ok := fragments[ref]
 		if !ok {
 			continue
 		}
@@ -169,22 +183,9 @@ func nativeDataFields(design json.RawMessage, kitComponents []kit.Component) map
 		return nil
 	}
 
-	var doc struct {
-		Nodes []struct {
-			Type      string `json:"type"`
-			Component string `json:"component"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal(design, &doc); err != nil {
-		return nil
-	}
-
 	out := map[string][]string{}
-	for _, node := range doc.Nodes {
-		if node.Type != "instance" {
-			continue
-		}
-		if n, ok := byID[node.Component]; ok {
+	for _, ref := range instanceComponents(design) {
+		if n, ok := byID[ref]; ok {
 			out[n.connector] = append(out[n.connector], n.fields...)
 		}
 	}

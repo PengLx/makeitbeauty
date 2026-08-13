@@ -25,6 +25,14 @@ export const OTHER_CATEGORY = "other";
 /** localStorage key for palette menu preferences ("mib.*" idiom). */
 export const PALETTE_STORAGE_KEY = "mib.palette";
 
+/**
+ * Community browse orderings (§8: GET /v1/community/components?sort=).
+ * "newest" is the server default and the prefs default alike.
+ */
+export const COMMUNITY_SORTS = ["newest", "uses", "favorites"] as const;
+export type CommunitySort = (typeof COMMUNITY_SORTS)[number];
+export const DEFAULT_COMMUNITY_SORT: CommunitySort = "newest";
+
 /** True when `slug` is one of the recommended taxonomy categories. */
 export function isKnownCategory(slug: string): boolean {
   return (KIT_CATEGORIES as readonly string[]).includes(slug);
@@ -116,24 +124,70 @@ export function buildKitMenu<T extends SearchableEntry & { category?: string }>(
   );
 }
 
-// ---- persisted group open/closed state -------------------------------------
+// ---- persisted palette preferences ------------------------------------------
+// One "mib.palette" JSON payload holds every palette preference:
+// {collapsed?: string[], sort?: "uses"|"favorites"}. Defaults are OMITTED
+// (groups default open, sort defaults "newest"), so a fresh profile stores
+// nothing surprising and old {collapsed} payloads parse unchanged.
+
+/** Safe parse of the raw payload into a plain object; malformed = empty. */
+function parsePrefsObject(raw: string | null): Record<string, unknown> {
+  try {
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {}; // corrupt JSON — every preference falls back to its default
+  }
+}
 
 /**
- * Parse the "mib.palette" localStorage payload ({collapsed: string[]}) into
- * the set of collapsed category slugs. Groups default OPEN, so only the
- * collapsed set is stored; anything malformed degrades to "all open".
+ * Parse the payload into the set of collapsed category slugs. Groups default
+ * OPEN, so only the collapsed set is stored; anything malformed degrades to
+ * "all open".
  */
 export function parsePalettePrefs(raw: string | null): Set<string> {
-  try {
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return new Set();
-    const collapsed = (parsed as Record<string, unknown>).collapsed;
-    if (!Array.isArray(collapsed)) return new Set();
-    return new Set(collapsed.filter((c): c is string => typeof c === "string"));
-  } catch {
-    return new Set(); // corrupt JSON — all groups open
+  const collapsed = parsePrefsObject(raw).collapsed;
+  if (!Array.isArray(collapsed)) return new Set();
+  return new Set(collapsed.filter((c): c is string => typeof c === "string"));
+}
+
+/**
+ * Parse the payload's persisted community sort. Absent, unknown, or
+ * malformed values all degrade to the "newest" default — a stale pref from
+ * a future taxonomy must never wedge browse into a 400.
+ */
+export function parsePaletteSort(raw: string | null): CommunitySort {
+  const sort = parsePrefsObject(raw).sort;
+  return typeof sort === "string" &&
+    (COMMUNITY_SORTS as readonly string[]).includes(sort)
+    ? (sort as CommunitySort)
+    : DEFAULT_COMMUNITY_SORT;
+}
+
+/**
+ * Re-serialize the payload with `patch` applied, PRESERVING whatever else is
+ * stored — writing the collapsed set must not clobber the sort pref and vice
+ * versa (both live under the one key). Default values serialize away; the
+ * collapsed set is sorted for stable storage diffs.
+ */
+export function mergePalettePrefs(
+  raw: string | null,
+  patch: { collapsed?: ReadonlySet<string>; sort?: CommunitySort },
+): string {
+  const prefs = parsePrefsObject(raw);
+  if (patch.collapsed !== undefined) {
+    if (patch.collapsed.size === 0) delete prefs.collapsed;
+    else prefs.collapsed = [...patch.collapsed].sort();
   }
+  if (patch.sort !== undefined) {
+    if (patch.sort === DEFAULT_COMMUNITY_SORT) delete prefs.sort;
+    else prefs.sort = patch.sort;
+  }
+  return JSON.stringify(prefs);
 }
 
 /** Inverse of parsePalettePrefs (sorted for stable storage diffs). */

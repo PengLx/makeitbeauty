@@ -35,6 +35,10 @@ type Server struct {
 	// kit is the palette metadata served by GET /v1/kit, loaded once at
 	// startup and sorted by id.
 	kit []kit.Component
+	// usage counts distinct referencing projects per community component —
+	// derived, in-memory, rebuilt at boot from all projects' ComponentRefs
+	// and maintained on project writes (see usage.go).
+	usage *usageIndex
 }
 
 // Deps bundles the wired dependencies of NewServer.
@@ -62,6 +66,7 @@ func NewServer(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		renderer: deps.Renderer,
 		demoData: deps.DemoData,
 		kit:      deps.Kit,
+		usage:    newUsageIndex(),
 	}
 }
 
@@ -89,6 +94,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/components/{owner}/{name}", s.requireSession(s.handleUpdateComponentDraft))
 	mux.HandleFunc("DELETE /v1/components/{owner}/{name}", s.requireSession(s.handleUnlistComponent))
 	mux.HandleFunc("POST /v1/components/{owner}/{name}/publish", s.requireSession(s.handlePublishComponent))
+	// Favorites (§8). "/v1/components/favorites" is a literal one-segment
+	// path and never collides with the two-segment {owner}/{name} patterns.
+	mux.HandleFunc("GET /v1/components/favorites", s.requireSession(s.handleListFavorites))
+	mux.HandleFunc("PUT /v1/components/{owner}/{name}/favorite", s.requireSession(s.handleSetFavorite))
+	mux.HandleFunc("DELETE /v1/components/{owner}/{name}/favorite", s.requireSession(s.handleUnsetFavorite))
 	mux.HandleFunc("GET /v1/components/{owner}/{name}", s.handleGetComponent)
 	mux.HandleFunc("GET /v1/components/{owner}/{name}/versions/{n}", s.handleGetComponentVersion)
 	mux.HandleFunc("GET /v1/community/components", s.handleBrowseComponents)

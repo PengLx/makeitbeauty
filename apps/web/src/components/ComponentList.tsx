@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { Blocks, Plus, RefreshCw } from "lucide-react";
+import { Blocks, Heart, Plus, RefreshCw } from "lucide-react";
 import { toApiError, type ApiError, type Me } from "@/lib/api";
 import { createComponent, updateComponent } from "@/lib/api";
 import { COMPONENT_NAME_RE, splitComponentId } from "@/lib/component";
@@ -254,6 +254,22 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
                       <span className="truncate">
                         {c.updatedAt ? `Updated ${timeAgo(c.updatedAt)}` : " "}
                       </span>
+                      {/* §8 community counts — rendered only when the route
+                          serves them (GET /v1/components does not today, so
+                          this stays dormant until it does). */}
+                      {(c.usageCount !== undefined ||
+                        c.favoriteCount !== undefined) && (
+                        <span className="ml-auto flex shrink-0 items-center gap-1 tabular-nums">
+                          <Heart aria-hidden className="size-3" />
+                          {c.favoriteCount ?? 0}
+                          {(c.usageCount ?? 0) > 0 && (
+                            <span>
+                              · used in {c.usageCount}{" "}
+                              {c.usageCount === 1 ? "project" : "projects"}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </CardFooter>
                   </Card>
                 </li>

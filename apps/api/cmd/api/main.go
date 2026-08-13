@@ -133,6 +133,12 @@ func run(log *slog.Logger) error {
 		DemoData: demoData,
 		Kit:      kitComponents,
 	})
+	// Community usage counters (architecture.md §8): build the in-memory
+	// index from every project's ComponentRefs before serving — O(projects)
+	// once; project writes keep it current from here on.
+	if err := server.BuildUsageIndex(context.Background()); err != nil {
+		return err
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.Handler(),
