@@ -10,6 +10,12 @@ import {
   type CommunityComponent,
 } from "@/lib/api";
 import type { ComponentDefinition } from "@/lib/component";
+import {
+  buildInstancePreviewDesign,
+  materializeDefaultProps,
+  pinnedPreviewKey,
+} from "@/lib/hoverPreview";
+import { PreviewHoverCard } from "@/components/PreviewHoverCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -88,24 +94,40 @@ export function Palette({
             <ul className="space-y-1.5">
               {kit.components.map((c) => (
                 <li key={c.id}>
-                  <button
-                    onClick={() => onInsertComponent(c)}
-                    title={c.description}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-left transition-colors
-                      hover:border-ring hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  {/* Kit registry ids ("kit/…") are the preview cache keys
+                      verbatim. The native title tooltip is dropped — the
+                      hover card carries the rendered preview instead. */}
+                  <PreviewHoverCard
+                    title={c.title}
+                    frame={c.frame}
+                    previewKey={c.id}
+                    getDesign={() =>
+                      buildInstancePreviewDesign(
+                        c.id,
+                        c.frame,
+                        materializeDefaultProps(c.props),
+                      )
+                    }
+                    caption={c.native ? "renders your live data" : undefined}
                   >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-medium">{c.title}</span>
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {c.frame.w}×{c.frame.h}
-                      </span>
-                    </div>
-                    {c.description && (
-                      <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                        {c.description}
+                    <button
+                      onClick={() => onInsertComponent(c)}
+                      className="w-full rounded-lg border bg-background px-3 py-2 text-left transition-colors
+                        hover:border-ring hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-medium">{c.title}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {c.frame.w}×{c.frame.h}
+                        </span>
                       </div>
-                    )}
-                  </button>
+                      {c.description && (
+                        <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                          {c.description}
+                        </div>
+                      )}
+                    </button>
+                  </PreviewHoverCard>
                 </li>
               ))}
             </ul>
@@ -286,10 +308,10 @@ function UserComponentCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ref = `${id}@${version}`;
 
   async function insert() {
     if (busy) return;
-    const ref = `${id}@${version}`;
     setBusy(true);
     setError(null);
     try {
@@ -303,28 +325,44 @@ function UserComponentCard({
   }
 
   return (
-    <button
-      onClick={() => void insert()}
-      disabled={busy}
-      className="w-full rounded-lg border bg-background px-3 py-2 text-left transition-colors
-        hover:border-ring hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none
-        disabled:opacity-60"
+    // Preview keys by the same pinned ref insertion uses, and resolves the
+    // definition through the same version cache — hover then insert (or the
+    // reverse) fetches the definition exactly once.
+    <PreviewHoverCard
+      title={title}
+      previewKey={pinnedPreviewKey(id, version)}
+      getDesign={async () => {
+        const def = await getComponentVersionCached(ref);
+        return buildInstancePreviewDesign(
+          ref,
+          def.frame,
+          materializeDefaultProps(def.props),
+        );
+      }}
     >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
-          <span className="truncate">{title}</span>
-          {busy && (
-            <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-          )}
-        </span>
-        <span className="font-mono text-[10px] text-muted-foreground">
-          v{version}
-        </span>
-      </div>
-      <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-        {subtitle}
-      </div>
-      {error && <div className="mt-1 text-[10px] text-destructive">{error}</div>}
-    </button>
+      <button
+        onClick={() => void insert()}
+        disabled={busy}
+        className="w-full rounded-lg border bg-background px-3 py-2 text-left transition-colors
+          hover:border-ring hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none
+          disabled:opacity-60"
+      >
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+            <span className="truncate">{title}</span>
+            {busy && (
+              <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+            )}
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            v{version}
+          </span>
+        </div>
+        <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+          {subtitle}
+        </div>
+        {error && <div className="mt-1 text-[10px] text-destructive">{error}</div>}
+      </button>
+    </PreviewHoverCard>
   );
 }

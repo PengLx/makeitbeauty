@@ -9,8 +9,13 @@ import {
   seedDefinition,
   type ComponentTemplate,
 } from "@/lib/componentTemplates";
+import {
+  buildTemplatePreviewDesign,
+  templatePreviewKey,
+} from "@/lib/hoverPreview";
 import { twApproxStyle } from "@/lib/tw";
 import { cn } from "@/lib/utils";
+import { PreviewHoverCard } from "./PreviewHoverCard";
 import { useMyComponents } from "@/hooks/useMyComponents";
 import { timeAgo } from "@/lib/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -281,32 +286,52 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
                 aria-labelledby="start-from-label"
                 className="grid grid-cols-2 gap-2"
               >
-                {COMPONENT_TEMPLATES.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={templateId === t.id}
-                    onClick={() => selectTemplate(t)}
-                    className={cn(
-                      "rounded-lg border p-2 text-left transition-colors hover:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-                      templateId === t.id && "border-sky-500 ring-1 ring-sky-500",
-                    )}
-                  >
-                    <span
-                      aria-hidden
+                {COMPONENT_TEMPLATES.map((t) => {
+                  const button = (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={templateId === t.id}
+                      onClick={() => selectTemplate(t)}
                       className={cn(
-                        "mb-1.5 block h-7 rounded-md",
-                        t.swatchTw === "" && "border border-dashed",
+                        "rounded-lg border p-2 text-left transition-colors hover:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                        templateId === t.id && "border-sky-500 ring-1 ring-sky-500",
                       )}
-                      style={twApproxStyle(t.swatchTw)}
-                    />
-                    <span className="block text-xs font-medium">{t.label}</span>
-                    <span className="block text-[11px] leading-snug text-muted-foreground">
-                      {t.blurb}
-                    </span>
-                  </button>
-                ))}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "mb-1.5 block h-7 rounded-md",
+                          t.swatchTw === "" && "border border-dashed",
+                        )}
+                        style={twApproxStyle(t.swatchTw)}
+                      />
+                      <span className="block text-xs font-medium">{t.label}</span>
+                      <span className="block text-[11px] leading-snug text-muted-foreground">
+                        {t.blurb}
+                      </span>
+                    </button>
+                  );
+                  // Templates are local defs — the hover preview inlines
+                  // their nodes with default props (Studio expansion) and
+                  // renders through the same /v1/preview + cache machinery
+                  // as palette entries. Blank has nothing to render.
+                  const seed = t.seed;
+                  if (seed === null) return button;
+                  return (
+                    <PreviewHoverCard
+                      key={t.id}
+                      title={t.label}
+                      frame={t.frame}
+                      previewKey={templatePreviewKey(t.id)}
+                      getDesign={() => buildTemplatePreviewDesign(t.frame, seed)}
+                      side="top"
+                    >
+                      {button}
+                    </PreviewHoverCard>
+                  );
+                })}
               </div>
             </div>
             <div className="space-y-2">

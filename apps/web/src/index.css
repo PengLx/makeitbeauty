@@ -138,3 +138,15 @@
     @apply font-sans;
   }
 }
+
+/* Hover previews are display-only. Radix positions the card inside a
+   popper wrapper div, and BOTH boxes hit-test over whatever they float
+   above (the palette cards open over the canvas) — the content would even
+   hold the card open via its own pointerenter. pointer-events is
+   inherited, so turning it off on the wrapper makes the whole floating
+   layer click-through: canvas clicks/drags land underneath, and the card
+   closes as soon as the pointer leaves the trigger. Scoped to the inert
+   preview card (components/PreviewHoverCard.tsx) via its data flag. */
+[data-radix-popper-content-wrapper]:has(> [data-hover-preview]) {
+  pointer-events: none;
+}
