@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+/* Canvas content font — renderer parity (src/lib/canvasText.ts). Self-hosted
+   Inter, latin 400+700 only: the same two weights the renderer embeds
+   (apps/renderer/fonts, `make fonts`). The editor CHROME stays Geist; only
+   canvas node text opts into Inter via CANVAS_TEXT_DEFAULTS. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-700.css";
 
 @custom-variant dark (&:is(.dark *));
 

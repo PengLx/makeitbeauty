@@ -1,7 +1,10 @@
 // Package kit loads the official component kit (packages/kit/components)
 // into the palette metadata served by GET /v1/kit (architecture.md §8).
-// Components are parsed minimally — id, title, frame, props — the API never
-// interprets fragment nodes; expansion is the renderer's job (§5.7).
+// Components are parsed minimally — id, title, frame, props — plus the
+// definition body (nodes, computed) passed through verbatim so the editor
+// can expand kit instances client-side for canvas preview. The API still
+// never interprets fragment nodes; render expansion is the renderer's job
+// (§5.7).
 package kit
 
 import (
@@ -40,6 +43,20 @@ type Component struct {
 	// them into the design's github binding for every instance of the
 	// component (v0: natives are fixed to the github connector).
 	DataFields []string `json:"dataFields,omitempty"`
+	// Nodes is the component's definition body: its design-schema fragment
+	// node array, passed through verbatim (the API never interprets nodes).
+	// Serving it lets the editor expand kit instances client-side so the
+	// canvas shows real component content instead of placeholder boxes.
+	// For declarative components these are the real render nodes; for
+	// native components they are the file's static preview nodes — the
+	// renderer's trusted generator supplies the real nodes at render time,
+	// so the static preview is exactly what a canvas approximation should
+	// draw. Always a JSON array; [] when a native file declares none.
+	Nodes json.RawMessage `json:"nodes"`
+	// Computed is the file's computed-geometry rule list, passed through
+	// verbatim when present so client-side expansion applies the same
+	// prop-driven geometry as the renderer. Omitted when the file has none.
+	Computed json.RawMessage `json:"computed,omitempty"`
 }
 
 // ResolveDir returns an existing directory path for p. Like fixture.Resolve,
@@ -122,6 +139,8 @@ func parseFile(path string) (Component, error) {
 		Props       json.RawMessage `json:"props"`
 		Native      bool            `json:"native"`
 		DataFields  []string        `json:"dataFields"`
+		Nodes       json.RawMessage `json:"nodes"`
+		Computed    json.RawMessage `json:"computed"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return Component{}, fmt.Errorf("invalid JSON: %w", err)
@@ -147,6 +166,14 @@ func parseFile(path string) (Component, error) {
 	if len(props) == 0 {
 		props = json.RawMessage("{}") // a component may declare no props
 	}
+	nodes, err := parseNodes(raw.Nodes, raw.Native)
+	if err != nil {
+		return Component{}, err
+	}
+	computed, err := parseComputed(raw.Computed)
+	if err != nil {
+		return Component{}, err
+	}
 	return Component{
 		ID:          "kit/" + raw.ID,
 		Title:       raw.Title,
@@ -155,7 +182,44 @@ func parseFile(path string) (Component, error) {
 		Props:       props,
 		Native:      raw.Native,
 		DataFields:  raw.DataFields,
+		Nodes:       nodes,
+		Computed:    computed,
 	}, nil
+}
+
+// parseNodes validates the definition body's node array, mirroring the
+// schema's if/else on native (kit-component.schema.json): declarative
+// components require at least one node — the nodes ARE the component —
+// while native components' nodes are only the static preview and may be []
+// or absent (normalized to [] so /v1/kit always serves an array).
+func parseNodes(raw json.RawMessage, native bool) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		if !native {
+			return nil, fmt.Errorf("declarative component must declare nodes")
+		}
+		return json.RawMessage("[]"), nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, fmt.Errorf("nodes must be a JSON array: %w", err)
+	}
+	if !native && len(items) == 0 {
+		return nil, fmt.Errorf("declarative component must declare at least one node")
+	}
+	return raw, nil
+}
+
+// parseComputed validates the optional computed-geometry rule list; absent
+// (or null) stays absent so /v1/kit omits the key.
+func parseComputed(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, fmt.Errorf("computed must be a JSON array: %w", err)
+	}
+	return raw, nil
 }
 
 func dirExists(p string) bool {

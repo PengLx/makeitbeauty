@@ -23,9 +23,12 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 // ---- GET /v1/kit --------------------------------------------------------
-// Public kit metadata for the editor palette (architecture.md §8). The list
-// is loaded once at startup and immutable, so a short client cache matches
-// the Camo/raw cadence used elsewhere.
+// Public kit metadata for the editor palette (architecture.md §8), including
+// each component's definition body (nodes, and computed when present) so the
+// editor can expand kit instances client-side for canvas preview. Kit
+// definitions are public in-repo content. The list is loaded once at startup
+// and immutable, so a short client cache matches the Camo/raw cadence used
+// elsewhere.
 
 func (s *Server) handleKit(w http.ResponseWriter, _ *http.Request) {
 	components := s.kit

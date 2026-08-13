@@ -109,7 +109,8 @@ export function Editor({ me, projectId, onBack }: Props) {
   const userDefs = useComponentDefs(userRefs);
   // One lookup for every instance surface: kit entries + resolved user
   // definitions narrowed to the KitComponent metadata shape (id here is the
-  // pinned ref, matching node.component verbatim).
+  // pinned ref, matching node.component verbatim). Definition bodies (nodes,
+  // computed) ride along so the canvas can draw instances expanded.
   const componentsById = useMemo(() => {
     const merged = new Map<string, KitComponent>(kitById);
     for (const [ref, def] of userDefs) {
@@ -119,6 +120,8 @@ export function Editor({ me, projectId, onBack }: Props) {
         description: def.description,
         frame: def.frame,
         props: def.props,
+        nodes: def.nodes,
+        computed: def.computed,
       });
     }
     return merged;

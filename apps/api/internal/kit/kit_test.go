@@ -51,7 +51,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "output is sorted by id regardless of file order",
 			files: map[string]string{
-				"z-banner.json": `{"id": "banner", "title": "Banner", "frame": {"w": 10, "h": 10}, "props": {}}`,
+				"z-banner.json": `{"id": "banner", "title": "Banner", "frame": {"w": 10, "h": 10}, "props": {}, "nodes": [{"id": "bg", "type": "rect"}]}`,
 				"a-card.json":   validStatCard,
 			},
 			wantIDs: []string{"kit/banner", "kit/stat-card"},
@@ -65,6 +65,13 @@ func TestLoad(t *testing.T) {
 				"missing-title.json": `{"id": "untitled", "frame": {"w": 10, "h": 10}}`,
 				"zero-frame.json":    `{"id": "flat", "title": "Flat", "frame": {"w": 0, "h": 10}}`,
 				"no-frame.json":      `{"id": "unframed", "title": "Unframed"}`,
+				// Declarative components: the nodes ARE the component, so
+				// missing/empty/non-array nodes are malformed (schema else-branch).
+				"no-nodes.json":    `{"id": "hollow", "title": "Hollow", "frame": {"w": 10, "h": 10}}`,
+				"empty-nodes.json": `{"id": "vacant", "title": "Vacant", "frame": {"w": 10, "h": 10}, "nodes": []}`,
+				"bad-nodes.json":   `{"id": "warped", "title": "Warped", "frame": {"w": 10, "h": 10}, "nodes": {"id": "bg"}}`,
+				"bad-computed.json": `{"id": "twisted", "title": "Twisted", "frame": {"w": 10, "h": 10},
+					"nodes": [{"id": "bg", "type": "rect"}], "computed": {"node": "bg"}}`,
 			},
 			wantIDs: []string{"kit/stat-card"},
 		},
@@ -131,6 +138,59 @@ func TestLoadParsesFields(t *testing.T) {
 	if _, ok := props["label"]; !ok {
 		t.Errorf("Props = %s, want the label declaration passed through", c.Props)
 	}
+	// The definition body passes through verbatim so the editor can expand
+	// instances client-side.
+	if got := string(c.Nodes); got != `[{"id": "bg", "type": "rect"}]` {
+		t.Errorf("Nodes = %s, want the raw node array passed through", got)
+	}
+	if c.Computed != nil {
+		t.Errorf("Computed = %s, want nil (omitted) for a component without computed", c.Computed)
+	}
+}
+
+// Computed-geometry rules pass through verbatim when present, so client-side
+// expansion can apply the same prop-driven geometry as the renderer.
+func TestLoadParsesComputed(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"bar.json": `{"id": "bar", "title": "Bar", "frame": {"w": 480, "h": 72},
+			"nodes": [{"id": "fill", "type": "rect"}],
+			"computed": [{"node": "fill", "field": "w", "prop": "percent", "scale": 4.4, "clamp": [0, 440]}]}`,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 {
+		t.Fatalf("got %d components, want 1", len(components))
+	}
+	want := `[{"node": "fill", "field": "w", "prop": "percent", "scale": 4.4, "clamp": [0, 440]}]`
+	if got := string(components[0].Computed); got != want {
+		t.Errorf("Computed = %s, want the raw rule array passed through", got)
+	}
+}
+
+// Native components' nodes are only the static palette preview and may be []
+// or absent (schema then-branch); absent normalizes to [] so /v1/kit always
+// serves an array.
+func TestLoadNativeNodesOptional(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"no-nodes.json": `{"id": "a-bare", "title": "Bare native", "native": true,
+			"dataFields": ["stats.calendar"], "frame": {"w": 10, "h": 10}}`,
+		"empty-nodes.json": `{"id": "b-empty", "title": "Empty native", "native": true,
+			"dataFields": ["stats.calendar"], "frame": {"w": 10, "h": 10}, "nodes": []}`,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 2 {
+		t.Fatalf("got %d components, want 2", len(components))
+	}
+	for _, c := range components {
+		if got := string(c.Nodes); got != "[]" {
+			t.Errorf("%s: Nodes = %s, want []", c.ID, got)
+		}
+	}
 }
 
 const validHeatmap = `{
@@ -191,7 +251,7 @@ func TestLoadRejectsHalfNativeComponents(t *testing.T) {
 
 func TestLoadDefaultsMissingProps(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
-		"bare.json": `{"id": "bare", "title": "Bare", "frame": {"w": 10, "h": 10}}`,
+		"bare.json": `{"id": "bare", "title": "Bare", "frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,
 	})
 	components, err := Load(dir, discard)
 	if err != nil {

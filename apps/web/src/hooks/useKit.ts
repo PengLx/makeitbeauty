@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { ComputedEntry, FragmentNode } from "@/lib/component";
 
 /** Kit palette metadata per architecture.md §8: GET /v1/kit. */
 export interface KitProp {
@@ -14,6 +15,19 @@ export interface KitComponent {
   description?: string;
   frame: { w: number; h: number };
   props: Record<string, KitProp>;
+  /**
+   * The component's definition body, served verbatim by /v1/kit — always an
+   * array. For native components these are the file's STATIC PREVIEW nodes
+   * (possibly []); the renderer's trusted generator supplies the real nodes
+   * at render time. The canvas expands these via lib/expandFragment.ts.
+   */
+  nodes: FragmentNode[];
+  /** Computed-geometry rules, present only when the component file declares them. */
+  computed?: ComputedEntry[];
+  /** Official-kit only: a renderer generator produces the render-time nodes. */
+  native?: boolean;
+  /** Connector snapshot paths a native component consumes. */
+  dataFields?: string[];
 }
 
 export interface KitState {
@@ -46,7 +60,13 @@ export function useKit(): KitState {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body: unknown = await res.json();
         if (!Array.isArray(body)) throw new Error("unexpected /v1/kit shape");
-        setComponents(body as KitComponent[]);
+        // The contract serves `nodes` on every entry; normalize defensively so
+        // the canvas can rely on an array against an older API.
+        setComponents(
+          (body as KitComponent[]).map((c) =>
+            Array.isArray(c.nodes) ? c : { ...c, nodes: [] },
+          ),
+        );
         setError(null);
       } catch (e) {
         if (controller.signal.aborted) return;

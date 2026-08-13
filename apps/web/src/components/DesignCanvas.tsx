@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { Puzzle } from "lucide-react";
 import {
@@ -6,10 +6,19 @@ import {
   findNode,
   type DesignDoc,
   type DesignNode,
+  type ImageNode,
   type InstanceNode,
   type RectNode,
   type TextNode,
 } from "@/lib/design";
+import type { FragmentNode } from "@/lib/component";
+import { expandFragment } from "@/lib/expandFragment";
+import {
+  CANVAS_TEXT_DEFAULTS,
+  RENDERER_TEXT_ALIGN_DEFAULT,
+  letterSpacingPx,
+  textJustify,
+} from "@/lib/canvasText";
 import {
   buildSnapTargets,
   effectiveSnapOptions,
@@ -484,9 +493,16 @@ interface NodeProps {
   onPointerEnd: () => void;
 }
 
-/** One node, drawn to approximate the renderer's satori tree (apps/renderer/src/tree.ts). */
-function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onPointerEnd }: NodeProps) {
-  const frame: CSSProperties = {
+/** The renderer's baseStyle (tree.ts): the absolute frame every node body sits in. */
+function nodeFrameStyle(node: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  opacity?: number;
+  rotation?: number;
+}): CSSProperties {
+  return {
     position: "absolute",
     left: node.x,
     top: node.y,
@@ -495,7 +511,26 @@ function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onP
     opacity: node.opacity,
     transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
   };
+}
 
+/**
+ * Whether an instance's component definition expands on the canvas — one
+ * predicate shared by CanvasNode (frame style) and InstanceBody (render
+ * path) so the two can never disagree about which path a node takes.
+ */
+function expandsOnCanvas(kit: KitComponent | undefined): kit is KitComponent {
+  return !!kit && Array.isArray(kit.nodes) && kit.nodes.length > 0;
+}
+
+/** One node, drawn to approximate the renderer's satori tree (apps/renderer/src/tree.ts). */
+function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onPointerEnd }: NodeProps) {
+  // Renderer parity (kit.ts expandInstance): expansion reads ONLY the
+  // instance's x/y/w/h — instance opacity/rotation never reach production
+  // output, so painting them here would preview an effect the renderer
+  // never shows (same reasoning as the deliberate no-tw rule below). The
+  // PLACEHOLDER path keeps them: tree.ts instanceEl applies baseStyle(node),
+  // opacity/rotation included.
+  const expands = node.type === "instance" && expandsOnCanvas(kitById.get(node.component));
   return (
     <div
       data-node-id={node.id}
@@ -503,37 +538,33 @@ function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onP
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
-      className={cn("cursor-move touch-none select-none", !selected && "hover:ring-1 hover:ring-sky-500/40")}
-      style={frame}
+      // `group` drives the instance overlay's hover reveal (InstanceBody).
+      className={cn("group cursor-move touch-none select-none", !selected && "hover:ring-1 hover:ring-sky-500/40")}
+      style={nodeFrameStyle(expands ? { ...node, opacity: undefined, rotation: undefined } : node)}
     >
-      <NodeBody node={node} kitById={kitById} />
+      <NodeBody node={node} kitById={kitById} selected={selected} />
     </div>
   );
 }
 
-function NodeBody({ node, kitById }: { node: DesignNode; kitById: Map<string, KitComponent> }) {
+function NodeBody({
+  node,
+  kitById,
+  selected,
+}: {
+  node: DesignNode;
+  kitById: Map<string, KitComponent>;
+  selected: boolean;
+}) {
   switch (node.type) {
     case "text":
       return <TextBody node={node} />;
     case "rect":
       return <RectBody node={node} />;
     case "image":
-      return (
-        <img
-          src={node.src}
-          alt=""
-          draggable={false}
-          className="pointer-events-none h-full w-full"
-          // tw under structured (tree.ts imageEl) — e.g. rounded-full applies
-          // unless an explicit structured radius overrides it.
-          style={layerStyles(twApproxStyle(node.tw), {
-            objectFit: node.fit ?? "cover",
-            borderRadius: node.radius,
-          })}
-        />
-      );
+      return <ImageBody node={node} />;
     case "instance":
-      return <InstanceBody node={node} kitById={kitById} />;
+      return <InstanceBody node={node} kitById={kitById} selected={selected} />;
   }
 }
 
@@ -545,31 +576,51 @@ function NodeBody({ node, kitById }: { node: DesignNode; kitById: Map<string, Ki
 
 function TextBody({ node }: { node: TextNode }) {
   const s = node.style ?? {};
-  const align = s.align ?? "left";
+  const align = s.align ?? RENDERER_TEXT_ALIGN_DEFAULT;
   return (
     <div
-      className="flex h-full w-full"
+      className="h-full w-full"
+      // tree.ts textEl layer order: defaults < tw < frame (the wrapper div
+      // here) < flex/align < structured. The defaults pin Inter + the
+      // renderer's text metrics so canvas text measures like the preview
+      // (lib/canvasText.ts — the chrome's Geist/line-height never leak in).
       style={layerStyles(
-        {
-          justifyContent: align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start",
-          textAlign: align,
-          fontFamily: s.fontFamily ?? "Inter, sans-serif",
-          fontSize: s.fontSize ?? 16,
-          fontWeight: 400,
-          // Renderer default is #000000 (tree.ts); mirror it so WYSIWYG holds.
-          color: "#000000",
-        },
+        CANVAS_TEXT_DEFAULTS,
         twApproxStyle(node.tw),
         {
+          display: "flex",
+          justifyContent: textJustify(align),
+          textAlign: align,
+        },
+        {
+          fontFamily: s.fontFamily,
+          fontSize: s.fontSize,
           fontWeight: s.fontWeight,
           color: s.color,
           lineHeight: s.lineHeight,
-          letterSpacing: s.letterSpacing !== undefined ? `${s.letterSpacing}px` : undefined,
+          letterSpacing: s.letterSpacing !== undefined ? letterSpacingPx(s.letterSpacing) : undefined,
         },
       )}
     >
       {node.text}
     </div>
+  );
+}
+
+function ImageBody({ node }: { node: ImageNode }) {
+  return (
+    <img
+      src={node.src}
+      alt=""
+      draggable={false}
+      className="pointer-events-none h-full w-full"
+      // tw under structured (tree.ts imageEl) — e.g. rounded-full applies
+      // unless an explicit structured radius overrides it.
+      style={layerStyles(twApproxStyle(node.tw), {
+        objectFit: node.fit ?? "cover",
+        borderRadius: node.radius,
+      })}
+    />
   );
 }
 
@@ -599,17 +650,94 @@ function RectBody({ node }: { node: RectNode }) {
 }
 
 /**
- * Instances show title + frame outline; the true expansion renders in the
- * preview panel. Deliberately NO tw approximation here: the renderer ignores
- * tw on instance nodes in v0 (tree.ts instanceEl — it warns instead), so
- * painting it on the canvas would preview an effect production never shows.
+ * Instances render their EXPANDED fragments — lib/expandFragment.ts, the
+ * renderer's expandInstance mirrored client-side — so intra-component layout
+ * (padding, text, computed geometry) is visible while editing, closing the
+ * canvas↔preview gap. {{props.*}} resolves against the instance's props;
+ * data templates ({{github.*}}) stay literal — data preview is the
+ * API-rendered preview panel's job.
+ *
+ * NATIVE components (kit `native: true`) draw their declared STATIC PREVIEW
+ * nodes — an approximation BY DESIGN: the real nodes come from the
+ * renderer's trusted generator (apps/renderer/src/native.ts) at render time,
+ * from live connector data the browser doesn't have.
+ *
+ * The expansion is display-only: `pointer-events-none` keeps hit-testing and
+ * selection on the instance box (the CanvasNode wrapper), and a subtle
+ * outline + title badge appears only while the instance is hovered
+ * (CanvasNode's `group`) or selected. Unknown/unloaded refs — and native
+ * components without preview nodes — keep the dashed placeholder, matching
+ * the renderer's degrade path (§5.7).
+ *
+ * Deliberately NO tw approximation on the instance node itself: the renderer
+ * ignores tw on instance nodes in v0 (tree.ts instanceEl — it warns
+ * instead), so painting it would preview an effect production never shows.
  */
-function InstanceBody({ node, kitById }: { node: InstanceNode; kitById: Map<string, KitComponent> }) {
+function InstanceBody({
+  node,
+  kitById,
+  selected,
+}: {
+  node: InstanceNode;
+  kitById: Map<string, KitComponent>;
+  selected: boolean;
+}) {
   const kit = kitById.get(node.component);
+  // Memoized per instance: node identity only changes when this node is
+  // patched, and kit definitions are immutable once fetched.
+  const expansion = useMemo(() => {
+    if (!expandsOnCanvas(kit)) return null;
+    // Children are positioned relative to the instance box (the CanvasNode
+    // wrapper already sits at node.x/node.y), so the offset here is 0,0.
+    return expandFragment(kit, node.props, { x: 0, y: 0, w: node.w, h: node.h });
+  }, [kit, node.props, node.w, node.h]);
+
+  if (!expansion) {
+    // Unknown/unloaded component, or a native one with no static preview.
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-sky-500/50 bg-sky-500/5">
+        <span className="text-xs font-medium text-sky-400">{kit?.title ?? node.component}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{node.component}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-sky-500/50 bg-sky-500/5">
-      <span className="text-xs font-medium text-sky-400">{kit?.title ?? node.component}</span>
-      <span className="font-mono text-[10px] text-muted-foreground">{node.component}</span>
+    // No overflow clip: the renderer doesn't clip expanded nodes either, and
+    // s = min(w/frame.w, h/frame.h) keeps in-frame content inside the box.
+    <div className="pointer-events-none relative h-full w-full">
+      {expansion.nodes.map((child) => (
+        <div key={child.id} style={nodeFrameStyle(child)}>
+          <FragmentBody node={child} />
+        </div>
+      ))}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-0 rounded-sm border border-dashed border-sky-500/40 opacity-0 transition-opacity group-hover:opacity-100",
+          selected && "opacity-100",
+        )}
+      />
+      <span
+        className={cn(
+          "absolute top-0.5 left-0.5 max-w-[calc(100%-4px)] truncate rounded-sm bg-sky-500/80 px-1 font-mono text-[9px] leading-4 text-white opacity-0 transition-opacity group-hover:opacity-100",
+          selected && "opacity-100",
+        )}
+      >
+        {kit?.title ?? node.component}
+      </span>
     </div>
   );
+}
+
+/** An expanded fragment child — text/rect/image only (no nesting in kit v0). */
+function FragmentBody({ node }: { node: FragmentNode }) {
+  switch (node.type) {
+    case "text":
+      return <TextBody node={node} />;
+    case "rect":
+      return <RectBody node={node} />;
+    case "image":
+      return <ImageBody node={node} />;
+  }
 }
