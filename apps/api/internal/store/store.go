@@ -104,6 +104,7 @@ type Component struct {
 	Title         string
 	Description   string
 	Category      string          // optional palette-menu slug ("" == uncategorized)
+	Kind          string          // "" == declarative (default); "code" == sandboxed render function (§7.6)
 	Draft         json.RawMessage // working definition (kit-component shape)
 	LatestVersion int             // 0 == never published
 	Unlisted      bool            // hidden from browse; pinned versions still serve

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://makeitbeauty.dev/schemas/kit-component.v0.json",
   "title": "MakeItBeauty kit component (v0)",
-  "description": "A declarative, parameterized design fragment, referenced from designs as \"kit/{id}\". Nodes are design-schema nodes positioned relative to the frame; {{props.*}} slots resolve with the standard template engine; computed entries map a numeric prop linearly onto node geometry (prop × scale, clamped) — no code execution. Nested instance nodes are not allowed (v0). Two variants (see if/else): declarative (nodes required — they ARE the component; native/dataFields absent) and native (native: true + dataFields — a TRUSTED generator inside the renderer produces the render nodes from (props, data, frame); array-driven visuals like a 53×7 contribution heatmap cannot be expressed declaratively; declared nodes are only the static palette preview, so [] or absent is fine). Native components ship with MakeItBeauty itself: community publish validation rejects native/dataFields. This file is the contract for packages/kit/components.",
+  "description": "A parameterized design fragment, referenced from designs as \"kit/{id}\". Nodes are design-schema nodes positioned relative to the frame; {{props.*}} slots resolve with the standard template engine; computed entries map a numeric prop linearly onto node geometry (prop × scale, clamped). Nested instance nodes are not allowed (v0). Three variants (see allOf): declarative (default — nodes required, they ARE the component; no code execution ever), native (native: true + dataFields — a TRUSTED generator inside the renderer produces the render nodes from (props, data, frame); official kit only, community publish validation rejects it; declared nodes are only the static palette preview, so [] or absent is fine), and code (kind: \"code\" + code — architecture.md §7.6: a pure render({props, frame}) => nodes function executed in the capability-less QuickJS sandbox; declared nodes are only the static palette preview; computed is declarative-only and forbidden here — compute geometry inside render(); native/dataFields/dataConnector are mutually exclusive with kind \"code\"). Code components are the one variant open to the community registry alongside declarative ones. This file is the contract for packages/kit/components.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "title", "frame", "props"],
@@ -15,6 +15,16 @@
     },
     "title": { "type": "string", "minLength": 1, "maxLength": 100 },
     "description": { "type": "string", "maxLength": 1000 },
+    "kind": {
+      "enum": ["declarative", "code"],
+      "description": "Component variant. Absent means \"declarative\" (the original format — every pre-existing file stays valid). \"code\" (§7.6): the `code` source is REQUIRED and executes in the capability-less sandbox as render({props, frame}) => text/rect/image nodes; declared nodes become the OPTIONAL static palette preview ([] or absent is fine); computed is forbidden (declarative-only — code computes its own geometry); native/dataFields/dataConnector are forbidden (mutually exclusive — a component is trusted-native or sandboxed-code, never both)."
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536,
+      "description": "kind \"code\" only (forbidden otherwise): JavaScript source that defines render — `function render({ props, frame }) { ... }` or `const render = ({ props, frame }) => ...` — returning an array of design-schema text/rect/image nodes in frame coordinates. Executed in the capability-less QuickJS-in-WASM sandbox under hard limits (~50ms CPU, 32MB memory, ≤512 nodes, ≤512KB output; source ≤64KB — this maxLength mirrors the sandbox's byte cap). Deterministic by construction: no Date, no Math.random, no async, no host APIs; publish executes it twice against the declared prop defaults and byte-compares the output. Output nodes flow through the exact same validation/scale/offset/sanitize gates as declarative fragments."
+    },
     "category": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{0,23}$",
@@ -40,7 +50,7 @@
     "nodes": {
       "type": "array",
       "maxItems": 64,
-      "description": "Design-schema fragment, positioned relative to the frame — (0,0) is the component's own top-left corner. Required (min 1) for declarative components; for native components it is only the static palette preview and may be [] or absent (see if/else).",
+      "description": "Design-schema fragment, positioned relative to the frame — (0,0) is the component's own top-left corner. Required (min 1) for declarative components; for native and code components it is only the static palette preview and may be [] or absent (see allOf).",
       "items": { "$ref": "#/$defs/fragmentNode" }
     },
     "computed": {
@@ -73,18 +83,41 @@
     "native": ["dataFields"],
     "dataFields": ["native"]
   },
-  "if": { "required": ["native"] },
-  "then": {
-    "description": "Native component: the renderer's trusted generator supplies the render nodes, so declared nodes are only the static palette preview — [] or absent is fine."
-  },
-  "else": {
-    "required": ["nodes"],
-    "properties": { "nodes": { "minItems": 1 } },
-    "description": "Declarative component: the nodes ARE the component — required, at least one."
-  },
+  "allOf": [
+    {
+      "$comment": "Variant switch on kind (§7.6). kind \"code\": code required; computed (declarative-only) and the native family (mutually exclusive) forbidden. Any other kind: code forbidden.",
+      "if": { "properties": { "kind": { "const": "code" } }, "required": ["kind"] },
+      "then": {
+        "required": ["code"],
+        "properties": {
+          "computed": false,
+          "native": false,
+          "dataFields": false,
+          "dataConnector": false
+        }
+      },
+      "else": {
+        "properties": { "code": false }
+      }
+    },
+    {
+      "$comment": "Who supplies the render nodes. Native and code components get them from the trusted generator / the sandboxed render function, so declared nodes are only the static palette preview — [] or absent is fine. Declarative components' nodes ARE the component: required, at least one.",
+      "if": {
+        "anyOf": [
+          { "required": ["native"] },
+          { "properties": { "kind": { "const": "code" } }, "required": ["kind"] }
+        ]
+      },
+      "then": {},
+      "else": {
+        "required": ["nodes"],
+        "properties": { "nodes": { "minItems": 1 } }
+      }
+    }
+  ],
   "$defs": {
     "propDecl": {
-      "description": "A prop slot: type, optional description, and the default used when an instance omits the prop (and for the palette preview). The default must match the declared type. Color props are strings.",
+      "description": "A prop slot: type, optional description, and the default used when an instance omits the prop (and for the palette preview). The default must match the declared type. Color props are strings. \"series\" props are JSON arrays (a contribution calendar, hours per day, …): at render time an instance value that is a SOLE \"{{path}}\" template resolves to the RAW array at that path (passed through untouched — never stringified); anything non-array falls back to the declared default with a warning. Declarative fragments do NOT interpolate series values ({{props.x}} of an array resolves to the em-dash placeholder) — only code components (kind \"code\") consume them in v1.",
       "oneOf": [
         {
           "type": "object",
@@ -104,6 +137,20 @@
             "type": { "const": "number" },
             "description": { "type": "string", "maxLength": 500 },
             "default": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "default"],
+          "properties": {
+            "type": { "const": "series" },
+            "description": { "type": "string", "maxLength": 500 },
+            "default": {
+              "type": "array",
+              "maxItems": 1024,
+              "description": "The default series — a JSON array; elements are unconstrained JSON (numbers, or objects like {date, count}). It feeds publish validation (code components execute against declared defaults, twice, byte-compared) and palette previews, so make it representative."
+            }
           }
         }
       ]

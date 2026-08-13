@@ -16,7 +16,7 @@ import (
 	"github.com/makeitbeauty/makeitbeauty/apps/api/internal/store"
 )
 
-// Community component registry routes (architecture.md §7.5/§8).
+// Community component registry routes (architecture.md §7.5/§7.6/§8).
 // Namespace = owner's login lowercased: ids are "{owner}/{name}". Drafts are
 // mutable and private; published versions are immutable and pinned by
 // designs as "{owner}/{name}@{n}". Unpublish only unlists — pinned usages
@@ -42,6 +42,13 @@ const (
 	componentDescriptionMaxLength = 1000
 	// componentFrameMax is the schema's frame dimension cap.
 	componentFrameMax = 4096
+	// Component kinds (architecture.md §7.6): absent/"declarative" is the
+	// default node-fragment shape; "code" is a sandboxed pure render function.
+	componentKindDeclarative = "declarative"
+	componentKindCode        = "code"
+	// componentCodeMaxBytes caps code component source, matching the sandbox
+	// engine's maxSourceBytes limit (64 KiB, §7.6).
+	componentCodeMaxBytes = 65536
 )
 
 // componentDefinition is the kit-component document shape the API composes
@@ -49,24 +56,38 @@ const (
 // through raw: the renderer owns their validation at publish time
 // (POST /internal/validate-component), the API never interprets fragments.
 type componentDefinition struct {
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Description string          `json:"description,omitempty"`
-	Category    string          `json:"category,omitempty"`
-	Frame       kit.Frame       `json:"frame"`
-	Props       json.RawMessage `json:"props"`
-	Nodes       json.RawMessage `json:"nodes"`
-	Computed    json.RawMessage `json:"computed,omitempty"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	// Kind is "" (declarative, the default — stays absent on the wire) or
+	// "code": a sandboxed pure render function (architecture.md §7.6). The
+	// API only gates the shape; the renderer's publish-time validator owns
+	// executing and validating the code inside the QuickJS sandbox.
+	Kind string `json:"kind,omitempty"`
+	// Code is the render-function source, required exactly when Kind is
+	// "code" and forbidden otherwise (≤ componentCodeMaxBytes). Public
+	// content once published, same as nodes.
+	Code     string          `json:"code,omitempty"`
+	Frame    kit.Frame       `json:"frame"`
+	Props    json.RawMessage `json:"props"`
+	Nodes    json.RawMessage `json:"nodes"`
+	Computed json.RawMessage `json:"computed,omitempty"`
 }
 
 // componentView is the wire shape of registry metadata. Draft and Unlisted
 // appear only in owner views; Definition is the latest published definition
 // on detail responses; PublishedAt is the latest publish time where known.
 type componentView struct {
-	ID            string          `json:"id"`
-	Title         string          `json:"title"`
-	Description   string          `json:"description,omitempty"`
-	Category      string          `json:"category,omitempty"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	// Kind is metadata ("code" for sandboxed code components, absent for
+	// declarative, §7.6) and travels on every view — including browse rows,
+	// which stay light: the source itself only ships inside definition
+	// payloads (detail + version fetch), never in list rows.
+	Kind          string          `json:"kind,omitempty"`
 	LatestVersion int             `json:"latestVersion"`
 	Unlisted      bool            `json:"unlisted,omitempty"`
 	CreatedAt     time.Time       `json:"createdAt"`
@@ -95,6 +116,7 @@ type componentVersionView struct {
 func publicComponentView(c *store.Component) componentView {
 	return componentView{
 		ID: c.ID, Title: c.Title, Description: c.Description, Category: c.Category,
+		Kind:          c.Kind,
 		LatestVersion: c.LatestVersion, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
@@ -172,6 +194,35 @@ func validateComponentCategory(category string) error {
 		return fmt.Errorf("category must be a lowercase slug matching %s (e.g. cards, stats, data, banners, decor)", kit.CategoryPattern)
 	}
 	return nil
+}
+
+// validateComponentKindCode gates the sandboxed-code definition surface
+// (architecture.md §7.6). kind is "" (declarative default — stays absent),
+// "declarative", or "code"; anything else is rejected. code is a *string so
+// present-but-empty is visible: it is REQUIRED (non-empty, ≤64 KiB) exactly
+// when kind is "code" and FORBIDDEN — even as "" — otherwise. This is the
+// most security-sensitive input surface of the registry, so the posture is
+// strict: when in doubt, reject with a polite 400. Only the shape is gated
+// here; the renderer's publish-time validator executes the code in the
+// QuickJS sandbox under full limits before anything is frozen.
+func validateComponentKindCode(kind string, code *string) error {
+	switch kind {
+	case "", componentKindDeclarative:
+		if code != nil {
+			return fmt.Errorf(`code is only allowed when kind is %q — declarative components carry nodes instead`, componentKindCode)
+		}
+		return nil
+	case componentKindCode:
+		if code == nil || *code == "" {
+			return fmt.Errorf(`code is required when kind is %q: the source of a render({ props, frame }) function`, componentKindCode)
+		}
+		if len(*code) > componentCodeMaxBytes {
+			return fmt.Errorf("code must be at most %d bytes", componentCodeMaxBytes)
+		}
+		return nil
+	default:
+		return fmt.Errorf(`kind must be %q or %q`, componentKindDeclarative, componentKindCode)
+	}
 }
 
 // validateComponentMeta checks the API-owned definition fields against
@@ -312,14 +363,19 @@ func (s *Server) handleListMyComponents(w http.ResponseWriter, r *http.Request) 
 // stored draft is working state, frozen copies live in ComponentVersions.
 
 type componentDraftRequest struct {
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Category    string          `json:"category"` // optional palette-menu slug; "" clears it
-	Frame       *kit.Frame      `json:"frame"`
-	Props       json.RawMessage `json:"props"`
-	Nodes       json.RawMessage `json:"nodes"`
-	Computed    json.RawMessage `json:"computed"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Category    string `json:"category"` // optional palette-menu slug; "" clears it
+	// Kind + Code: the sandboxed-code definition surface (§7.6). Code is a
+	// pointer so a present-but-empty "code" is distinguishable from absent —
+	// validateComponentKindCode rejects it in both directions.
+	Kind     string          `json:"kind"` // "" (declarative default) | "declarative" | "code"
+	Code     *string         `json:"code"`
+	Frame    *kit.Frame      `json:"frame"`
+	Props    json.RawMessage `json:"props"`
+	Nodes    json.RawMessage `json:"nodes"`
+	Computed json.RawMessage `json:"computed"`
 }
 
 func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +384,7 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req componentDraftRequest
-	if !decodeComponentBody(w, r, &req, "{id?, title, description?, category?, frame:{w,h}, props?, nodes?, computed?}") {
+	if !decodeComponentBody(w, r, &req, "{id?, title, description?, category?, kind?, code?, frame:{w,h}, props?, nodes?, computed?}") {
 		return
 	}
 	if req.ID != "" && req.ID != component.ID {
@@ -340,6 +396,10 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := validateComponentCategory(req.Category); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := validateComponentKindCode(req.Kind, req.Code); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -359,9 +419,16 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Kind/code pass through exactly as given: an absent kind stays absent
+	// ("kind defaults absent" — declarative is the implied default, §7.6),
+	// and code is only ever set on the "code" kind (enforced above).
+	var code string
+	if req.Kind == componentKindCode {
+		code = *req.Code
+	}
 	draft, err := json.Marshal(componentDefinition{
 		ID: component.ID, Title: req.Title, Description: req.Description,
-		Category: req.Category, Frame: *req.Frame,
+		Category: req.Category, Kind: req.Kind, Code: code, Frame: *req.Frame,
 		Props: props, Nodes: nodes, Computed: computed,
 	})
 	if err != nil {
@@ -371,6 +438,7 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 	component.Title = req.Title
 	component.Description = req.Description
 	component.Category = req.Category
+	component.Kind = req.Kind
 	component.Draft = draft
 	component.UpdatedAt = time.Now().UTC()
 	if err := s.stores.Components.Update(r.Context(), component); err != nil {

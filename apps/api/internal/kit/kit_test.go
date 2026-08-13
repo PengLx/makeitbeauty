@@ -381,6 +381,91 @@ func TestShippedKitComponentsAreCategorized(t *testing.T) {
 	}
 }
 
+// Code components (architecture.md §7.6): kind "code" + code pass through
+// verbatim — the editor's sandbox engine needs the source for client-side
+// preview parity — and nodes are only the optional static palette preview
+// (normalized to [] like natives). Declarative components never gain the
+// keys (omitempty).
+func TestLoadParsesCodeComponent(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"glow-fn.json": `{"id": "a-glow-fn", "title": "Glow fn", "kind": "code",
+			"code": "function render({ props, frame }) { return []; }",
+			"frame": {"w": 200, "h": 100}}`,
+		"preview-fn.json": `{"id": "b-preview-fn", "title": "Preview fn", "kind": "code",
+			"code": "function render() { return []; }",
+			"frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,
+		"stat-card.json": validStatCard,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 3 {
+		t.Fatalf("got %d components, want 3", len(components))
+	}
+	glow, preview, statCard := components[0], components[1], components[2]
+	if glow.Kind != "code" || glow.Code != "function render({ props, frame }) { return []; }" {
+		t.Errorf("glow-fn kind/code = %q/%q, want the file's values verbatim", glow.Kind, glow.Code)
+	}
+	if got := string(glow.Nodes); got != "[]" {
+		t.Errorf("glow-fn nodes = %s, want [] (absent static preview normalizes)", got)
+	}
+	if got := string(preview.Nodes); got != `[{"id": "bg", "type": "rect"}]` {
+		t.Errorf("preview-fn nodes = %s, want the static preview passed through", got)
+	}
+	if statCard.Kind != "" || statCard.Code != "" {
+		t.Errorf("declarative component gained kind/code: %q/%q", statCard.Kind, statCard.Code)
+	}
+	// omitempty: declarative components serialize without the keys.
+	b, err := json.Marshal(statCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"kind", "code"} {
+		if _, present := m[key]; present {
+			t.Errorf("%s key present on a declarative component: %s", key, b)
+		}
+	}
+}
+
+// The code-component shape gate mirrors the community registry's: kind and
+// code imply each other, native (trusted in-renderer generator) and code
+// (sandboxed) are mutually exclusive, the source is capped at the sandbox's
+// 64 KiB budget, and unknown kinds are malformed. Bad files are skipped —
+// reject rather than permit.
+func TestLoadRejectsBadCodeComponents(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"code-no-kind.json": `{"id": "a", "title": "A", "code": "function render() {}",
+			"frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,
+		"kind-no-code.json": `{"id": "b", "title": "B", "kind": "code", "frame": {"w": 10, "h": 10}}`,
+		"native-and-code.json": `{"id": "c", "title": "C", "kind": "code",
+			"code": "function render() {}", "native": true, "dataFields": ["stats.calendar"],
+			"frame": {"w": 10, "h": 10}}`,
+		"unknown-kind.json": `{"id": "d", "title": "D", "kind": "javascript",
+			"code": "function render() {}", "frame": {"w": 10, "h": 10}}`,
+		"declarative-kind-with-code.json": `{"id": "e", "title": "E", "kind": "declarative",
+			"code": "function render() {}", "frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,
+		"oversized-code.json": fmt.Sprintf(`{"id": "f", "title": "F", "kind": "code",
+			"code": %q, "frame": {"w": 10, "h": 10}}`, "//"+strings.Repeat("a", 65535)),
+		"good.json": validStatCard,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 || components[0].ID != "kit/stat-card" {
+		ids := make([]string, len(components))
+		for i, c := range components {
+			ids[i] = c.ID
+		}
+		t.Fatalf("components = %v, want only kit/stat-card (bad code files skipped)", ids)
+	}
+}
+
 func TestLoadDefaultsMissingProps(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"bare.json": `{"id": "bare", "title": "Bare", "frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,

@@ -1,5 +1,5 @@
 /**
- * Kit instance expansion (architecture.md §5.7).
+ * Kit instance expansion (architecture.md §5.7, §7.6).
  *
  * Kit components are declarative design fragments (packages/kit/components),
  * format pinned by packages/schema/kit-component.schema.json. Components load
@@ -15,6 +15,11 @@
  * declarative fragment: a TRUSTED generator (src/native.ts) produces the
  * nodes from (props, data, frame) — see the dispatch inside expandInstance.
  * Community components can never be native (§7.5).
+ *
+ * Components with kind "code" (§7.6) execute their `code` source as a pure
+ * render({props, frame}) function inside the capability-less QuickJS-in-WASM
+ * sandbox (@makeitbeauty/sandbox) — see expandCodeInstance. Output is nodes,
+ * never SVG, and flows through the exact same gates as declarative fragments.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,9 +31,19 @@ import addFormatsExport, { type FormatsPlugin } from "ajv-formats";
 
 const addFormats = addFormatsExport as unknown as FormatsPlugin;
 
+import {
+  DEFAULT_LIMITS,
+  SandboxError,
+  compileComponent,
+  executeRender,
+  sha256Hex,
+  type CompileResult,
+  type RenderResult as SandboxRenderResult,
+} from "@makeitbeauty/sandbox";
+
 import type { NodeGroup, RenderItem } from "./animate.js";
 import { BUILTIN_FAMILIES, isBuiltinFamily } from "./fonts.js";
-import { connectorSubtree, nativeGenerators } from "./native.js";
+import { connectorSubtree, nativeGenerators, type ResolvedProps } from "./native.js";
 import { repoPath } from "./paths.js";
 import { resolveDeep } from "./template.js";
 import type { DesignNode, InstanceNode } from "./types.js";
@@ -36,11 +51,16 @@ import type { DesignNode, InstanceNode } from "./types.js";
 /** Kit fragments may use every design node type except instance (no nesting in v0). */
 export type KitFragmentNode = Exclude<DesignNode, InstanceNode>;
 
-export interface KitProp {
-  type: "string" | "number";
-  description?: string;
-  default: string | number;
-}
+/**
+ * A declared prop slot. "series" (§7.6) declares a JSON-array prop (e.g. a
+ * contribution calendar): instance values pass through as RAW arrays (see
+ * mergeProps) and only code components consume them in v1 — declarative
+ * fragments resolve {{props.x}} of an array to the em-dash placeholder.
+ */
+export type KitProp =
+  | { type: "string"; description?: string; default: string }
+  | { type: "number"; description?: string; default: number }
+  | { type: "series"; description?: string; default: unknown[] };
 
 export interface ComputedEntry {
   node: string;
@@ -59,6 +79,19 @@ export interface KitComponent {
   props: Record<string, KitProp>;
   nodes: KitFragmentNode[];
   computed?: ComputedEntry[];
+  /**
+   * Component variant (§7.6). Absent means "declarative". "code": `code` is
+   * required and executes in the sandbox; declared nodes are only the static
+   * palette preview; computed and the native family are forbidden.
+   */
+  kind?: "declarative" | "code";
+  /**
+   * kind "code" only: JavaScript source defining render({props, frame}) =>
+   * text/rect/image nodes, executed in the capability-less QuickJS sandbox
+   * under DEFAULT_LIMITS. Deterministic by construction (no Date, no
+   * Math.random, no async, fresh context per execution).
+   */
+  code?: string;
   /**
    * Official-kit only: a trusted renderer generator produces this component's
    * nodes from (props, data, frame); the declared nodes are the static
@@ -118,6 +151,41 @@ function assertNoNestedInstance(raw: unknown, context: string): void {
 }
 
 /**
+ * Variant-shape rules (§7.6), checked ahead of ajv (whose allOf/if errors are
+ * opaque) so each violation gets a precise message. kind "code" requires the
+ * source, forbids computed (declarative-only — code computes its own
+ * geometry) and is mutually exclusive with the native family (a component is
+ * trusted-native or sandboxed-code, never both). `code` without kind "code"
+ * is rejected too — code never rides along silently on another variant.
+ */
+function assertKindShape(raw: object, context: string): void {
+  const kind = (raw as { kind?: unknown }).kind;
+  if (kind === "code") {
+    if ("native" in raw || "dataFields" in raw || "dataConnector" in raw) {
+      throw new KitError(
+        `${context}: kind "code" is mutually exclusive with "native"/"dataFields"/` +
+          `"dataConnector" — a component is trusted-native or sandboxed-code, never both`,
+      );
+    }
+    if ("computed" in raw) {
+      throw new KitError(
+        `${context}: "computed" is declarative-only — a code component computes its ` +
+          `geometry inside render()`,
+      );
+    }
+    const code = (raw as { code?: unknown }).code;
+    if (typeof code !== "string" || code.length === 0) {
+      throw new KitError(
+        `${context}: kind "code" requires a non-empty "code" string ` +
+          `(the render({props, frame}) function source)`,
+      );
+    }
+  } else if ("code" in raw) {
+    throw new KitError(`${context}: "code" requires kind "code"`);
+  }
+}
+
+/**
  * Semantic checks shared by the kit loader and community validation (§7.5):
  * unique node ids + computed integrity (known node, declared number prop,
  * ordered clamp).
@@ -151,6 +219,7 @@ function assertComponentSemantics(component: KitComponent, context: string): voi
  */
 export function parseKitComponent(raw: unknown, context: string): KitComponent {
   assertNoNestedInstance(raw, context);
+  if (raw !== null && typeof raw === "object") assertKindShape(raw, context);
 
   if (!validateFn(raw)) {
     const errors = (validateFn.errors ?? []).map(
@@ -159,9 +228,10 @@ export function parseKitComponent(raw: unknown, context: string): KitComponent {
     throw new KitError(`${context}: invalid kit component:\n  ${errors.join("\n  ")}`);
   }
   const component = raw;
-  // Native components may omit the static preview entirely ("nodes: [] or
-  // absent" — the trusted generator supplies the render nodes); normalize so
-  // every downstream consumer sees an array.
+  // Native and code components may omit the static preview entirely ("nodes:
+  // [] or absent" — the trusted generator / the sandboxed render function
+  // supplies the render nodes); normalize so every downstream consumer sees
+  // an array.
   (component as { nodes?: KitFragmentNode[] }).nodes ??= [];
   assertComponentSemantics(component, context);
   return component;
@@ -338,11 +408,12 @@ export function parseCommunityComponent(
   // Native components are official-kit only: their nodes come from trusted
   // generator code in this service, so a community definition claiming
   // native (or its dataFields/dataConnector companions) is rejected outright
-  // — community components stay declarative-only (architecture.md §7.5).
+  // — community components are declarative or sandboxed code (§7.5, §7.6),
+  // never native.
   if ("native" in raw || "dataFields" in raw || "dataConnector" in raw) {
     throw new KitError(
       `${context}: "native"/"dataFields"/"dataConnector" are reserved for the official kit — ` +
-        `community components are declarative-only`,
+        `community components may be declarative or code (kind: "code"), never native`,
     );
   }
   if (options.requireVersion && !id.includes("@")) {
@@ -353,6 +424,7 @@ export function parseCommunityComponent(
   }
 
   assertNoNestedInstance(raw, context);
+  assertKindShape(raw, context);
 
   if (!validateCommunityFn(raw)) {
     const errors = (validateCommunityFn.errors ?? []).map(
@@ -361,11 +433,21 @@ export function parseCommunityComponent(
     throw new KitError(`${context}: invalid component:\n  ${errors.join("\n  ")}`);
   }
   const component = raw as unknown as KitComponent;
+  // Code components may omit the static preview ("nodes: [] or absent") —
+  // normalize like the kit loader so downstream checks see an array.
+  (component as { nodes?: KitFragmentNode[] }).nodes ??= [];
   assertComponentSemantics(component, context);
   checkBuiltinFontFamilies(component, context);
 
   const warnings: string[] = [];
-  checkPropsOnlyTemplates(component, "", component, context, warnings);
+  // The props-only template rule walks every string in the definition EXCEPT
+  // the `code` source: JavaScript legitimately contains "{{…}}"-looking text,
+  // and it never goes through the template engine — a code component's OUTPUT
+  // resolves against a props-only scope (expandCodeInstance), so a data
+  // template smuggled into output dies as the unresolved placeholder anyway.
+  const { code: _codeSource, ...templateSurface } = component as KitComponent &
+    Record<string, unknown>;
+  checkPropsOnlyTemplates(templateSurface, "", component, context, warnings);
   return { component, warnings };
 }
 
@@ -419,22 +501,44 @@ export interface Expansion {
   warnings: string[];
 }
 
+/** Instance props after merging over declared defaults (series props are raw arrays). */
+export type MergedProps = Record<string, string | number | unknown[]>;
+
 /**
  * Merge instance props over declared defaults. Number props accept a number
  * or a numeric string (a prop bound to connector data arrives as a string);
  * anything else warns and falls back to the declared default.
+ *
+ * Series props (§7.6): the instance value must be an ARRAY — either a literal
+ * one, or the raw value a SOLE "{{path}}" template resolved to (template.ts
+ * resolvePropsDeep passes arrays through untouched). Anything else — a
+ * missing path (the em-dash placeholder string), a non-sole template's
+ * stringification, a scalar — warns and falls back to the declared default
+ * array, NEVER a stringified value. Exported for the series test matrix.
  */
-function mergeProps(
+export function mergeProps(
   node: InstanceNode,
   component: KitComponent,
   warnings: string[],
-): Record<string, string | number> {
+): MergedProps {
   const given = node.props ?? {};
-  const merged: Record<string, string | number> = {};
+  const merged: MergedProps = {};
   for (const [name, decl] of Object.entries(component.props)) {
     const value = given[name];
     if (value === undefined || value === null) {
       merged[name] = decl.default;
+    } else if (decl.type === "series") {
+      if (Array.isArray(value)) {
+        merged[name] = value;
+      } else {
+        warnings.push(
+          `instance "${node.id}": prop "${name}" expects a series (a JSON array — bind it ` +
+            `with a sole "{{path}}" template or pass a literal array), got ` +
+            `${typeof value === "string" ? JSON.stringify(value) : `a ${typeof value}`} — ` +
+            `using the declared default`,
+        );
+        merged[name] = decl.default;
+      }
     } else if (decl.type === "number") {
       const num =
         typeof value === "number"
@@ -522,6 +626,19 @@ export function expandInstance(
     };
   }
 
+  // Code components (§7.6) execute asynchronously in the sandbox — the
+  // pipeline dispatches them to expandCodeInstance. Reaching this sync path
+  // with one is caller misuse; degrade to the placeholder, never fail.
+  if (component.kind === "code") {
+    return {
+      items: [node],
+      warnings: [
+        `instance "${node.id}": code component "${node.component}" requires the async ` +
+          `expansion path (expandCodeInstance) — rendering placeholder`,
+      ],
+    };
+  }
+
   const warnings: string[] = [];
   const props = mergeProps(node, component, warnings);
   const scope = { ...data, props };
@@ -546,8 +663,11 @@ export function expandInstance(
     if (generator) {
       try {
         let stripped = false;
+        // The cast is safe in practice: official natives declare only
+        // string/number props (a series-declared prop would arrive as a raw
+        // array; no official native declares one).
         const generated: KitFragmentNode[] = generator({
-          props,
+          props: props as ResolvedProps,
           data: connectorSubtree(data, component.dataConnector ?? "github"),
           frame: component.frame,
         }).map((gen) => {
@@ -638,4 +758,317 @@ export function expandInstance(
     return { items: [group], warnings };
   }
   return { items: nodes, warnings };
+}
+
+// ---------------------------------------------------------------------------
+// Code components (architecture.md §7.6)
+//
+// A code component's `code` executes as render({props, frame}) inside the
+// capability-less QuickJS-in-WASM sandbox (@makeitbeauty/sandbox) under
+// DEFAULT_LIMITS. Output is nodes, never SVG: it is ajv-validated against the
+// FRAGMENT node schema (text/rect/image only — an instance node in output is
+// rejected, so code can never smuggle a nested expansion), then flows through
+// the exact same resolve → computed(skip; declarative-only) → scaleAndOffset
+// → id-prefix pipeline as declarative fragments. Any sandbox failure degrades
+// to the dashed placeholder with a warning — render never fails.
+//
+// NOTE on blocking: the sandbox's sync QuickJS variant blocks the Node event
+// loop for up to limits.cpuMs (50ms) per execution. Acceptable at current
+// scale — renders are satori-CPU-bound anyway, and a design carries at most a
+// handful of code instances. Revisit with worker threads if p99 suffers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Output nodes may not exceed the sandbox node cap; the ajv gate re-states it
+ * so the schema alone is sufficient even if limits drift.
+ */
+const CODE_OUTPUT_MAX_NODES = DEFAULT_LIMITS.maxNodes;
+
+// Validates the FULL returned array against the kit fragment-node schema —
+// the same text/rect/image definitions ($refs into design.v0.json) the
+// declarative loader enforces, so code output can never carry a node shape
+// the rest of the pipeline has not already agreed to render.
+const codeOutputSchema = {
+  $id: "https://makeitbeauty.dev/schemas/code-output.v0.json",
+  type: "array",
+  maxItems: CODE_OUTPUT_MAX_NODES,
+  items: { $ref: "kit-component.v0.json#/$defs/fragmentNode" },
+};
+const validateCodeOutputFn: ValidateFunction<KitFragmentNode[]> =
+  ajv.compile<KitFragmentNode[]>(codeOutputSchema);
+
+/**
+ * Validate one execution's returned nodes (§7.6) or throw KitError:
+ *  1. every node is text/rect/image — an instance node gets its own precise
+ *     rejection (nested expansion from code is never allowed);
+ *  2. the array validates against the fragment node schema (ajv);
+ *  3. node ids are unique (the "{instanceId}__" prefix keeps ids unique
+ *     ACROSS instances only when they are unique within one output);
+ *  4. text nodes name BUILT-IN font families only — the §7.5 font-isolation
+ *     rule applied to code OUTPUT. The value must be a literal built-in: a
+ *     template here would dodge the check, so it fails it (checked before
+ *     any resolution, exactly like the declarative publish rule).
+ * Used by render-time expansion AND publish validation — one gate, two doors.
+ */
+export function validateCodeOutputNodes(raw: unknown[], context: string): KitFragmentNode[] {
+  for (const [i, item] of raw.entries()) {
+    const type = (item as { type?: unknown } | null)?.type;
+    if (type === "instance") {
+      throw new KitError(
+        `${context}: render() returned an instance node at [${i}] — code output may only ` +
+          `contain text/rect/image nodes (nested instances are never allowed)`,
+      );
+    }
+    if (type !== "text" && type !== "rect" && type !== "image") {
+      throw new KitError(
+        `${context}: render() output [${i}] is not a text/rect/image node ` +
+          `(got type ${JSON.stringify(type)})`,
+      );
+    }
+  }
+
+  if (!validateCodeOutputFn(raw)) {
+    const errors = (validateCodeOutputFn.errors ?? [])
+      .slice(0, 8)
+      .map((e) => `${e.instancePath || "/"}: ${e.message ?? "invalid"}`);
+    throw new KitError(
+      `${context}: render() output failed node validation:\n  ${errors.join("\n  ")}`,
+    );
+  }
+  const nodes = raw as KitFragmentNode[];
+
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    if (ids.has(node.id)) {
+      throw new KitError(`${context}: render() output has duplicate node id "${node.id}"`);
+    }
+    ids.add(node.id);
+  }
+
+  for (const [i, node] of nodes.entries()) {
+    if (node.type !== "text" || node.style?.fontFamily === undefined) continue;
+    if (!isBuiltinFamily(node.style.fontFamily)) {
+      const builtin = BUILTIN_FAMILIES.map((f) => `"${f.family}"`).join(", ");
+      throw new KitError(
+        `${context}: render() output [${i}].style.fontFamily ` +
+          `${JSON.stringify(node.style.fontFamily)} is not a built-in font family — code ` +
+          `component output may only use the built-ins (${builtin}); user-uploaded fonts ` +
+          `stay private to their owner's designs`,
+      );
+    }
+  }
+
+  return nodes;
+}
+
+/**
+ * Compile-check LRU keyed by sha256(source) — the fonts.ts cache pattern.
+ * The sandbox re-parses source in the fresh per-execution context anyway
+ * (state never survives, §7.6), so what is worth caching is the compile
+ * VERDICT: a known-good source skips the throwaway syntax-check runtime, and
+ * a known-bad one short-circuits straight to the placeholder without ever
+ * spinning the sandbox up again.
+ */
+export const CODE_COMPILE_CACHE_CAP = 128;
+const codeCompileCache = new Map<string, CompileResult>(); // Map preserves insertion order → LRU
+
+/** Cache keys, oldest first — exported for tests. */
+export function codeCompileCacheKeys(): string[] {
+  return [...codeCompileCache.keys()];
+}
+
+/** Empty the compile cache — exported for tests. */
+export function clearCodeCompileCache(): void {
+  codeCompileCache.clear();
+}
+
+async function compileCached(source: string): Promise<CompileResult> {
+  const hash = sha256Hex(source);
+  const cached = codeCompileCache.get(hash);
+  if (cached) {
+    // Refresh recency: delete + re-set moves the key to the Map's tail.
+    codeCompileCache.delete(hash);
+    codeCompileCache.set(hash, cached);
+    return cached;
+  }
+  const result = await compileComponent(source);
+  codeCompileCache.set(hash, result);
+  if (codeCompileCache.size > CODE_COMPILE_CACHE_CAP) {
+    // Evict the least-recently-used entry (the Map's head).
+    const oldest = codeCompileCache.keys().next().value as string;
+    codeCompileCache.delete(oldest);
+  }
+  return result;
+}
+
+/**
+ * Expand one kind:"code" instance (§7.6). Mirrors expandInstance's contract —
+ * pure given its inputs, never throws for component-attributable failures:
+ * every sandbox error (compile, timeout, memory, bad output, …) degrades to
+ * the dashed placeholder with a warning naming the instance and the reason.
+ *
+ * The returned nodes resolve against a PROPS-ONLY scope: §7.6's consent rule
+ * is "code receives props only", and its output gets no more than the code
+ * itself — a "{{connector.field}}" template emitted into output text would
+ * otherwise read snapshot data other nodes' bindings brought into the
+ * request, bypassing the props-only publish rule (which cannot see strings
+ * code builds at runtime). With the props-only scope such a template resolves
+ * to the em-dash placeholder plus a warning. Computed entries are skipped by
+ * construction (declarative-only; the schema forbids them for kind "code").
+ */
+export async function expandCodeInstance(
+  node: InstanceNode,
+  component: KitComponent,
+): Promise<Expansion> {
+  const warnings: string[] = [];
+  const props = mergeProps(node, component, warnings);
+  const code = component.code ?? "";
+
+  const placeholder = (reason: string): Expansion => {
+    warnings.push(
+      `instance "${node.id}": code component "${node.component}" ${reason} — rendering placeholder`,
+    );
+    return { items: [node], warnings };
+  };
+
+  const compiled = await compileCached(code);
+  if (!compiled.ok) return placeholder(`failed to compile: ${compiled.message}`);
+
+  let result: SandboxRenderResult;
+  try {
+    // Blocks the event loop up to DEFAULT_LIMITS.cpuMs — see the section note.
+    result = await executeRender(code, { props, frame: component.frame });
+  } catch (err) {
+    if (err instanceof SandboxError) return placeholder(`failed (${err.code}): ${err.message}`);
+    // Engine-level failure (not component-attributable) — still never fail
+    // the render; the warning names it so operators can tell the two apart.
+    return placeholder(
+      `hit a sandbox engine error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  // In-sandbox console output surfaces prefixed with the instance id.
+  for (const w of result.warnings) warnings.push(`instance "${node.id}": ${w}`);
+
+  let outputNodes: KitFragmentNode[];
+  try {
+    outputNodes = validateCodeOutputNodes(result.nodes, `instance "${node.id}"`);
+  } catch (err) {
+    if (err instanceof KitError) {
+      warnings.push(`${err.message} — rendering placeholder`);
+      return { items: [node], warnings };
+    }
+    throw err;
+  }
+
+  // The exact declarative treatment: resolve (props-only scope, see above) →
+  // computed (skipped — forbidden for code) → scaleAndOffset → id prefix.
+  // No structuredClone needed: output nodes are freshly JSON-parsed per
+  // execution, so nothing is shared to corrupt.
+  const s = Math.min(node.w / component.frame.w, node.h / component.frame.h);
+  let stripped = false;
+  const nodes = outputNodes.map((raw) => {
+    const copy = resolveDeep(raw, { props }, warnings) as KitFragmentNode;
+    scaleAndOffset(copy, s, node.x, node.y);
+    // Id-uniqueness across instances (raw.id: the schema's id pattern has no
+    // "{", so resolution can never have rewritten it).
+    copy.id = `${node.id}__${raw.id}`;
+    if (node.animation && copy.animation) {
+      stripped = true;
+      delete copy.animation;
+    }
+    return copy;
+  });
+  if (stripped) {
+    warnings.push(
+      `instance "${node.id}": generated node animations ignored — ` +
+        "an animated instance composes as one layer",
+    );
+  }
+
+  if (node.animation) {
+    const group: NodeGroup = {
+      kind: "group",
+      id: node.id,
+      animation: node.animation,
+      // Layer origin anchors to the instance box (final canvas-space frame).
+      frame: { x: node.x, y: node.y, w: node.w, h: node.h },
+      nodes,
+    };
+    return { items: [group], warnings };
+  }
+  return { items: nodes, warnings };
+}
+
+/**
+ * Publish-time execution checks for a kind:"code" community component
+ * (§7.6): compile, execute TWICE against the declared prop defaults under
+ * full limits, byte-compare the two serialized outputs, then run the shared
+ * output gate (fragment schema, no instances, unique ids, built-in fonts) on
+ * the sample. Throws KitError with a precise reason; returns the sample
+ * execution's console output as warnings.
+ *
+ * The double-run byte-compare is defense in depth: nondeterminism is already
+ * impossible by construction (Date is excluded at the intrinsic level,
+ * Math.random throws, there is no async, and every execution gets a fresh
+ * context so no state survives between the two runs). It stays because it is
+ * cheap (~2× cpuMs worst case) and turns any future sandbox regression into
+ * a loud publish-time rejection instead of a silently unstable image.
+ */
+export async function runCodePublishChecks(
+  component: KitComponent,
+  context: string,
+): Promise<string[]> {
+  const code = component.code ?? "";
+
+  const compiled = await compileComponent(code);
+  if (!compiled.ok) {
+    throw new KitError(`${context}: code failed to compile: ${compiled.message}`);
+  }
+
+  // Declared defaults are the sample input — this is why series defaults
+  // must be representative arrays: they are what publish validation renders.
+  const props = Object.fromEntries(
+    Object.entries(component.props).map(([name, decl]) => [name, decl.default]),
+  );
+  const input = { props, frame: component.frame };
+
+  const runOnce = async (): Promise<SandboxRenderResult> => {
+    try {
+      return await executeRender(code, input);
+    } catch (err) {
+      if (err instanceof SandboxError) {
+        throw new KitError(
+          `${context}: executing render() against the declared prop defaults failed ` +
+            `(${err.code}): ${err.message}`,
+        );
+      }
+      throw err;
+    }
+  };
+
+  const first = await runOnce();
+  const second = await runOnce();
+
+  const a = JSON.stringify(first.nodes);
+  const b = JSON.stringify(second.nodes);
+  if (a !== b) {
+    let what: string;
+    if (first.nodes.length !== second.nodes.length) {
+      what = `the runs returned ${first.nodes.length} vs ${second.nodes.length} nodes`;
+    } else {
+      const i = first.nodes.findIndex(
+        (n, idx) => JSON.stringify(n) !== JSON.stringify(second.nodes[idx]),
+      );
+      what = `output node [${i}] differs between the runs`;
+    }
+    throw new KitError(
+      `${context}: code is nondeterministic — two executions against the declared prop ` +
+        `defaults produced different output (${what}); render() must be a pure function ` +
+        `of (props, frame)`,
+    );
+  }
+
+  validateCodeOutputNodes(first.nodes, context);
+
+  return first.warnings.map((w) => `${context}: sample render: ${w}`);
 }

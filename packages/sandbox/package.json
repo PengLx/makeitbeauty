@@ -1,0 +1,30 @@
+{
+  "name": "@makeitbeauty/sandbox",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Capability-less QuickJS-in-WASM execution engine for code components: render({props, frame}) => nodes, under hard CPU/memory/output limits. One engine shared by the renderer (Node) and the editor (browser). Contract: docs/architecture.md section 7.6.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jitl/quickjs-singlefile-mjs-release-sync": "^0.32.0",
+    "quickjs-emscripten-core": "^0.32.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -29,6 +29,10 @@ var CategoryPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 // taxonomy.
 var connectorSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 
+// codeMaxBytes caps a code component's render-function source, matching the
+// sandbox engine's maxSourceBytes limit (64 KiB, architecture.md §7.6).
+const codeMaxBytes = 65536
+
 // Frame is the design-time bounding box of a component.
 type Frame struct {
 	W float64 `json:"w"`
@@ -48,7 +52,16 @@ type Component struct {
 	// decor). The editor buckets uncategorized components separately, so an
 	// absent category is omitted, never "".
 	Category string `json:"category,omitempty"`
-	Frame    Frame  `json:"frame"`
+	// Kind marks a code component ("code", architecture.md §7.6) — a
+	// sandboxed pure render function. Absent means declarative. Passed
+	// through so the editor knows to run the sandbox for preview.
+	Kind string `json:"kind,omitempty"`
+	// Code is a code component's render-function source, passed through
+	// verbatim (present exactly when Kind is "code"): kit definitions are
+	// public in-repo content, and the editor's sandbox engine needs the
+	// source for client-side preview parity (§7.6).
+	Code  string `json:"code,omitempty"`
+	Frame Frame  `json:"frame"`
 	// Props is the file's prop-declaration object, passed through verbatim.
 	Props json.RawMessage `json:"props"`
 	// Native marks a component whose nodes are produced by a trusted
@@ -159,6 +172,8 @@ func parseFile(path string) (Component, error) {
 		Title         string          `json:"title"`
 		Description   string          `json:"description"`
 		Category      string          `json:"category"`
+		Kind          string          `json:"kind"`
+		Code          string          `json:"code"`
 		Frame         Frame           `json:"frame"`
 		Props         json.RawMessage `json:"props"`
 		Native        bool            `json:"native"`
@@ -202,11 +217,36 @@ func parseFile(path string) (Component, error) {
 	if raw.DataConnector != "" && !connectorSlugPattern.MatchString(raw.DataConnector) {
 		return Component{}, fmt.Errorf("dataConnector %q must match %s", raw.DataConnector, connectorSlugPattern)
 	}
+	// Code components (architecture.md §7.6): kind "code" + code imply each
+	// other, and a component is exactly one of declarative / native / code —
+	// native means a TRUSTED in-renderer generator, code means the sandbox,
+	// so a file claiming both is malformed by construction.
+	switch raw.Kind {
+	case "", "declarative":
+		if raw.Code != "" {
+			return Component{}, fmt.Errorf(`code requires kind: "code"`)
+		}
+	case "code":
+		if raw.Native {
+			return Component{}, fmt.Errorf(`kind "code" cannot be combined with native: true`)
+		}
+		if raw.Code == "" {
+			return Component{}, fmt.Errorf(`kind "code" requires code`)
+		}
+		if len(raw.Code) > codeMaxBytes {
+			return Component{}, fmt.Errorf("code must be at most %d bytes", codeMaxBytes)
+		}
+	default:
+		return Component{}, fmt.Errorf(`kind must be "declarative" or "code"`)
+	}
 	props := raw.Props
 	if len(props) == 0 {
 		props = json.RawMessage("{}") // a component may declare no props
 	}
-	nodes, err := parseNodes(raw.Nodes, raw.Native)
+	// Native and code components' nodes are only the static palette preview
+	// and may be [] or absent; declarative components' nodes ARE the
+	// component (§7.6: "nodes optional as a static palette preview").
+	nodes, err := parseNodes(raw.Nodes, raw.Native || raw.Kind == "code")
 	if err != nil {
 		return Component{}, err
 	}
@@ -219,6 +259,8 @@ func parseFile(path string) (Component, error) {
 		Title:         raw.Title,
 		Description:   raw.Description,
 		Category:      raw.Category,
+		Kind:          raw.Kind,
+		Code:          raw.Code,
 		Frame:         raw.Frame,
 		Props:         props,
 		Native:        raw.Native,
@@ -229,14 +271,15 @@ func parseFile(path string) (Component, error) {
 	}, nil
 }
 
-// parseNodes validates the definition body's node array, mirroring the
-// schema's if/else on native (kit-component.schema.json): declarative
+// parseNodes validates the definition body's node array. Declarative
 // components require at least one node — the nodes ARE the component —
-// while native components' nodes are only the static preview and may be []
-// or absent (normalized to [] so /v1/kit always serves an array).
-func parseNodes(raw json.RawMessage, native bool) (json.RawMessage, error) {
+// while for native and code components (previewOnly) the nodes are only the
+// static palette preview and may be [] or absent (normalized to [] so
+// /v1/kit always serves an array); the real render nodes come from the
+// trusted generator or the sandboxed render function respectively.
+func parseNodes(raw json.RawMessage, previewOnly bool) (json.RawMessage, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		if !native {
+		if !previewOnly {
 			return nil, fmt.Errorf("declarative component must declare nodes")
 		}
 		return json.RawMessage("[]"), nil
@@ -245,7 +288,7 @@ func parseNodes(raw json.RawMessage, native bool) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, fmt.Errorf("nodes must be a JSON array: %w", err)
 	}
-	if !native && len(items) == 0 {
+	if !previewOnly && len(items) == 0 {
 		return nil, fmt.Errorf("declarative component must declare at least one node")
 	}
 	return raw, nil

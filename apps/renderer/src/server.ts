@@ -5,6 +5,8 @@
  *
  * Listens on MIB_RENDERER_ADDR (default ":7801", Go-style host:port).
  */
+import { warmup } from "@makeitbeauty/sandbox";
+
 import { loadFontsOrExit, type LoadedFont } from "./fonts.js";
 import { createRendererServer } from "./http.js";
 import { kitRegistry } from "./kit.js";
@@ -13,6 +15,10 @@ import { kitRegistry } from "./kit.js";
 const fonts: LoadedFont[] = loadFontsOrExit();
 // Kit components load + ajv-validate once at startup (throws KitError on a bad one).
 const kit = kitRegistry();
+// Pre-compile the sandbox wasm module (§7.6) so the first code-component
+// render or publish validation does not pay for it. Fire-and-forget: a
+// failure here surfaces on first use, and non-code renders never need it.
+void warmup().catch(() => {});
 
 const server = createRendererServer(fonts);
 

@@ -13,6 +13,7 @@
     "demo:tw": "tsx src/demo.ts tw"
   },
   "dependencies": {
+    "@makeitbeauty/sandbox": "workspace:*",
     "@makeitbeauty/twc": "workspace:*",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",

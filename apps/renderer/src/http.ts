@@ -18,7 +18,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import { BUILTIN_FAMILIES, FontError, mergeFonts, parseRequestFonts, type LoadedFont } from "./fonts.js";
-import { KitError, parseCommunityComponent, parseRequestComponents } from "./kit.js";
+import {
+  KitError,
+  parseCommunityComponent,
+  parseRequestComponents,
+  runCodePublishChecks,
+} from "./kit.js";
 import { render } from "./pipeline.js";
 import { SanitizeError } from "./sanitize.js";
 import type { RenderOptions } from "./types.js";
@@ -163,12 +168,19 @@ async function handleValidateComponent(req: IncomingMessage, res: ServerResponse
   try {
     // Draft ids ("{owner}/{name}") are fine here — the API assigns the
     // version pin when it freezes the publish.
-    const { warnings } = parseCommunityComponent(body.definition, "definition");
+    const { component, warnings } = parseCommunityComponent(body.definition, "definition");
+    // Code components (§7.6) additionally EXECUTE at publish time: compile,
+    // two runs against the declared prop defaults under full limits with a
+    // byte-compare (nondeterminism → rejection), and the shared output gate
+    // (fragment schema, no instances, unique ids, built-in fonts only).
+    // Sample-render console output joins the warnings.
+    const codeWarnings =
+      component.kind === "code" ? await runCodePublishChecks(component, "definition") : [];
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, warnings }));
+    res.end(JSON.stringify({ ok: true, warnings: [...warnings, ...codeWarnings] }));
   } catch (err) {
     if (err instanceof KitError) {
-      // Contract (§7.5): 422 with the first failure's precise reason.
+      // Contract (§7.5/§7.6): 422 with the first failure's precise reason.
       sendError(res, 422, "invalid_component", err.message);
       return;
     }

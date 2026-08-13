@@ -172,6 +172,41 @@ func TestHandleKitDataConnectorPassthrough(t *testing.T) {
 	}
 }
 
+// Code kit components (architecture.md §7.6) ride through /v1/kit with kind
+// + code intact — kit definitions are public in-repo content, and the
+// editor's sandbox engine needs the source for client-side preview parity.
+// Declarative components never gain the keys.
+func TestHandleKitCodePassthrough(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	src := `function render({ props, frame }) { return []; }`
+	s := NewServer(testConfig(), log, Deps{Stores: store.NewMemory(), Kit: []kit.Component{
+		{ID: "kit/glow-fn", Title: "Glow fn", Kind: "code", Code: src, Frame: kit.Frame{W: 200, H: 100}, Props: json.RawMessage(`{}`), Nodes: json.RawMessage(`[]`)},
+		{ID: "kit/stat-card", Title: "Stat card", Frame: kit.Frame{W: 260, H: 140}, Props: json.RawMessage(`{}`), Nodes: json.RawMessage(`[{"id":"bg","type":"rect"}]`)},
+	}})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/kit", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 2 {
+		t.Fatalf("got %d components, want 2", len(raw))
+	}
+	// Sorted: glow-fn, stat-card.
+	if raw[0]["kind"] != "code" || raw[0]["code"] != src {
+		t.Errorf("glow-fn kind/code = %v/%v, want code + the source verbatim", raw[0]["kind"], raw[0]["code"])
+	}
+	for _, key := range []string{"kind", "code"} {
+		if _, present := raw[1][key]; present {
+			t.Errorf("declarative component carries %q on the wire", key)
+		}
+	}
+}
+
 // A server with no kit components must serve [] — never null.
 func TestHandleKitEmpty(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -1,0 +1,83 @@
+{
+  "id": "demo/mini-heatmap@1",
+  "title": "Mini heatmap",
+  "description": "Reference CODE component (architecture.md §7.6): a pure render({props, frame}) function executed in the capability-less QuickJS sandbox, mapping a series prop (a JSON array of numbers) onto a grid of intensity cells. Used by apps/renderer tests (code-component.test.ts) as the happy-path fixture. Deterministic by construction: no Date, no Math.random, no async — publish executes it twice and byte-compares the output.",
+  "category": "data",
+  "kind": "code",
+  "frame": {
+    "w": 260,
+    "h": 80
+  },
+  "props": {
+    "label": {
+      "type": "string",
+      "description": "Caption above the grid.",
+      "default": "activity"
+    },
+    "accent": {
+      "type": "string",
+      "description": "Cell color for non-zero values (intensity via opacity).",
+      "default": "#3fb950"
+    },
+    "values": {
+      "type": "series",
+      "description": "Numbers to plot, one cell each, wrapping into rows of 13. Bind with a sole path template (e.g. a connector timeseries) or pass a literal array. This default feeds publish validation and the palette preview.",
+      "default": [
+        0,
+        1,
+        3,
+        5,
+        2,
+        0,
+        4,
+        6,
+        1,
+        0,
+        2,
+        3,
+        5,
+        7,
+        2,
+        1,
+        0,
+        4,
+        3,
+        2,
+        6,
+        5,
+        1,
+        0,
+        2,
+        4
+      ]
+    }
+  },
+  "code": "function render({ props, frame }) {\n  // A tiny deterministic heatmap: one rect per series value, wrapping into\n  // rows of 13, intensity = value / max. Pure function of (props, frame).\n  var values = Array.isArray(props.values) ? props.values : [];\n  var cols = 13;\n  var gap = 4;\n  var cell = 14;\n  var top = 24;\n  var count = Math.min(values.length, 128);\n  var nodes = [\n    {\n      id: \"label\",\n      type: \"text\",\n      x: 0,\n      y: 0,\n      w: frame.w,\n      h: 16,\n      text: props.label,\n      style: { fontSize: 12, color: \"#7d8590\" }\n    }\n  ];\n  function at(i) {\n    var v = values[i];\n    return typeof v === \"number\" && isFinite(v) && v > 0 ? v : 0;\n  }\n  var max = 0;\n  for (var i = 0; i < count; i++) {\n    if (at(i) > max) max = at(i);\n  }\n  for (var j = 0; j < count; j++) {\n    var t = max > 0 ? at(j) / max : 0;\n    var col = j % cols;\n    var row = (j - col) / cols;\n    nodes.push({\n      id: \"cell-\" + j,\n      type: \"rect\",\n      x: col * (cell + gap),\n      y: top + row * (cell + gap),\n      w: cell,\n      h: cell,\n      opacity: t === 0 ? 1 : Math.min(1, 0.3 + 0.7 * t),\n      style: { fill: t === 0 ? \"#161b22\" : props.accent, radius: 3 }\n    });\n  }\n  return nodes;\n}",
+  "nodes": [
+    {
+      "id": "preview-bg",
+      "type": "rect",
+      "x": 0,
+      "y": 24,
+      "w": 230,
+      "h": 32,
+      "style": {
+        "fill": "#161b22",
+        "radius": 3
+      }
+    },
+    {
+      "id": "preview-label",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "w": 260,
+      "h": 16,
+      "text": "{{props.label}}",
+      "style": {
+        "fontSize": 12,
+        "color": "#7d8590"
+      }
+    }
+  ]
+}

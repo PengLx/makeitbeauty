@@ -102,6 +102,7 @@ type componentRecord struct {
 	Title         string          `json:"title"`
 	Description   string          `json:"description,omitempty"`
 	Category      string          `json:"category,omitempty"`
+	Kind          string          `json:"kind,omitempty"`
 	Draft         json.RawMessage `json:"draft"`
 	LatestVersion int             `json:"latestVersion"`
 	Unlisted      bool            `json:"unlisted,omitempty"`
@@ -204,8 +205,8 @@ func (db *fileDB) load() error {
 	for _, rec := range components {
 		db.components[rec.ID] = &Component{
 			ID: rec.ID, OwnerID: rec.OwnerID, Title: rec.Title, Description: rec.Description,
-			Category: rec.Category,
-			Draft:    rec.Draft, LatestVersion: rec.LatestVersion, Unlisted: rec.Unlisted,
+			Category: rec.Category, Kind: rec.Kind,
+			Draft: rec.Draft, LatestVersion: rec.LatestVersion, Unlisted: rec.Unlisted,
 			CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 		}
 	}
@@ -345,8 +346,8 @@ func (db *fileDB) persistComponents() error {
 	for _, c := range db.components {
 		out = append(out, componentRecord{
 			ID: c.ID, OwnerID: c.OwnerID, Title: c.Title, Description: c.Description,
-			Category: c.Category,
-			Draft:    c.Draft, LatestVersion: c.LatestVersion, Unlisted: c.Unlisted,
+			Category: c.Category, Kind: c.Kind,
+			Draft: c.Draft, LatestVersion: c.LatestVersion, Unlisted: c.Unlisted,
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		})
 	}

@@ -14,7 +14,13 @@ import {
   type RenderItem,
 } from "./animate.js";
 import type { LoadedFont } from "./fonts.js";
-import { expandInstance, kitRegistry, mergeComponentRegistry, type KitComponent } from "./kit.js";
+import {
+  expandCodeInstance,
+  expandInstance,
+  kitRegistry,
+  mergeComponentRegistry,
+  type KitComponent,
+} from "./kit.js";
 import { sanitizeSvg } from "./sanitize.js";
 import { resolveNodeTemplates } from "./template.js";
 import { buildCanvas, buildNode } from "./tree.js";
@@ -49,7 +55,14 @@ export async function render(
     if (r.value.type === "instance") {
       // §5.6: tw does not apply to instance nodes yet (expansion complexity).
       if (r.value.tw) warnings.push(`${r.value.id}: tw on instance nodes is not supported`);
-      const expansion = expandInstance(r.value, registry, data);
+      // §7.6: code components execute in the sandbox (async, blocks ≤ cpuMs);
+      // everything else expands synchronously. Both degrade to the dashed
+      // placeholder on failure — never a failed render.
+      const component = registry.get(r.value.component);
+      const expansion =
+        component?.kind === "code"
+          ? await expandCodeInstance(r.value, component)
+          : expandInstance(r.value, registry, data);
       warnings.push(...expansion.warnings);
       items.push(...expansion.items);
     } else {

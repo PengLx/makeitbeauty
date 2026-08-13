@@ -43,21 +43,25 @@ COPY packages/action/package.json packages/action/
 COPY packages/kit/package.json packages/kit/
 COPY packages/schema/package.json packages/schema/
 COPY packages/twc/package.json packages/twc/
-# twc must be SELECTED (not just pulled in as a workspace dependency):
-# only selected projects get their devDependencies installed, and twc's
-# build needs its own typescript.
-RUN pnpm install --frozen-lockfile --filter @makeitbeauty/renderer --filter @makeitbeauty/twc
+COPY packages/sandbox/package.json packages/sandbox/
+# Workspace deps must be SELECTED (not just pulled in as dependencies):
+# only selected projects get their devDependencies installed, and both
+# twc's and sandbox's builds need their own typescript.
+RUN pnpm install --frozen-lockfile --filter @makeitbeauty/renderer --filter @makeitbeauty/twc --filter @makeitbeauty/sandbox
 
-# twc (workspace dep) must be built before the renderer's tsc can resolve it
+# workspace deps must be built before the renderer's tsc can resolve them
 COPY packages/twc/tsconfig.json packages/twc/
 COPY packages/twc/src/ packages/twc/src/
+COPY packages/sandbox/tsconfig.json packages/sandbox/
+COPY packages/sandbox/src/ packages/sandbox/src/
 COPY apps/renderer/tsconfig.json apps/renderer/
 COPY apps/renderer/src/ apps/renderer/src/
 RUN pnpm --filter @makeitbeauty/twc build \
+ && pnpm --filter @makeitbeauty/sandbox build \
  && pnpm --filter @makeitbeauty/renderer build \
  # replace the dev install with production-only node_modules for the runtime stage
- && rm -rf node_modules apps/renderer/node_modules packages/twc/node_modules \
- && pnpm install --prod --frozen-lockfile --filter @makeitbeauty/renderer --filter @makeitbeauty/twc
+ && rm -rf node_modules apps/renderer/node_modules packages/twc/node_modules packages/sandbox/node_modules \
+ && pnpm install --prod --frozen-lockfile --filter @makeitbeauty/renderer --filter @makeitbeauty/twc --filter @makeitbeauty/sandbox
 
 # ---- runtime --------------------------------------------------------------
 FROM node:24-slim
@@ -72,9 +76,13 @@ COPY --from=build --chown=node:node /app/node_modules/ node_modules/
 COPY --from=build --chown=node:node /app/apps/renderer/node_modules/ apps/renderer/node_modules/
 COPY --from=build --chown=node:node /app/apps/renderer/package.json apps/renderer/
 COPY --from=build --chown=node:node /app/apps/renderer/dist/ apps/renderer/dist/
-# workspace dep target of the @makeitbeauty/twc symlink in apps/renderer/node_modules
+# workspace dep targets of the @makeitbeauty/* symlinks in apps/renderer/node_modules
 COPY --from=build --chown=node:node /app/packages/twc/package.json packages/twc/
 COPY --from=build --chown=node:node /app/packages/twc/dist/ packages/twc/dist/
+# sandbox has runtime deps (QuickJS WASM), so its node_modules symlinks ride along
+COPY --from=build --chown=node:node /app/packages/sandbox/package.json packages/sandbox/
+COPY --from=build --chown=node:node /app/packages/sandbox/dist/ packages/sandbox/dist/
+COPY --from=build --chown=node:node /app/packages/sandbox/node_modules/ packages/sandbox/node_modules/
 COPY --from=fonts --chown=node:node /fonts/ apps/renderer/fonts/
 # shared runtime assets, straight from the build context
 COPY --chown=node:node packages/schema/ packages/schema/

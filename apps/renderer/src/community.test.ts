@@ -83,17 +83,17 @@ describe("parseCommunityComponent", () => {
     );
   });
 
-  it("rejects native components — community components are declarative-only", () => {
+  it("rejects native components — natives are reserved for the official kit", () => {
     expect(() =>
       parseCommunityComponent(
         { ...badge(), native: true, dataFields: ["stats.calendar"] },
         "definition",
       ),
-    ).toThrow(/declarative-only/);
+    ).toThrow(/never native/);
     // dataFields alone is just as much a native claim.
     expect(() =>
       parseCommunityComponent({ ...badge(), dataFields: ["stats.calendar"] }, "definition"),
-    ).toThrow(/declarative-only/);
+    ).toThrow(/never native/);
   });
 
   it("rejects malformed ids with the expected shape in the message", () => {
@@ -201,10 +201,10 @@ describe("parseRequestComponents", () => {
   it("rejects a native definition inside a render request (natives ship with the kit)", () => {
     expect(() =>
       parseRequestComponents([{ ...badge(), native: true, dataFields: ["stats.calendar"] }]),
-    ).toThrow(/declarative-only/);
+    ).toThrow(/never native/);
     expect(() =>
       parseRequestComponents([{ ...badge(), dataFields: ["stats.calendar"] }]),
-    ).toThrow(/declarative-only/);
+    ).toThrow(/never native/);
   });
 });
 
@@ -360,7 +360,7 @@ describe("HTTP endpoints", () => {
       expect(res.status).toBe(422);
       const body = (await res.json()) as { error: { code: string; message: string } };
       expect(body.error.code).toBe("invalid_component");
-      expect(body.error.message).toContain("declarative-only");
+      expect(body.error.message).toContain("never native");
     });
 
     it("requires the definition field (400, request-shape error)", async () => {

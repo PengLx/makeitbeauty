@@ -234,6 +234,43 @@ Component        { id "{owner}/{name}", ownerId, title, description, latestVersi
 ComponentVersion { componentId, version, definition, publishedAt }        — immutable
 ```
 
+### 7.6 Code components (sandboxed)
+
+A code component is a **pure render function** executed in a capability-less
+QuickJS-in-WASM sandbox — the Figma-plugin / Shopify-Functions pattern the
+founding research identified as the only safe shape for third-party code:
+
+```
+render({ props, frame }) => FragmentNode[]      // text/rect/image nodes only
+```
+
+- **Output is nodes, never SVG.** Sandbox output flows through the exact same
+  gates as declarative fragments: node schema validation, expansion
+  scale/offset, animation compositing, the sanitizer. Code adds LOGIC to the
+  declarative universe, never capabilities — a compromised sandbox can still
+  only "speak" text/rect/image.
+- **The consent model is unchanged.** Code receives PROPS ONLY — including the
+  `series` prop type (arrays, e.g. a contribution calendar) that templates and
+  prop-merging pass through untouched. No connector access, no `dataFields`
+  (official natives only). Data reaches code exclusively through props the
+  design author binds, so "this image will publicly display …" stays true.
+- **No capabilities, by construction**: no fetch/network, no host APIs, no
+  `Date`, no `Math.random` (removed at context setup — determinism is enforced
+  by the runtime, and publish executes twice and byte-compares), no async
+  (render must return synchronously).
+- **Resource limits**: ~50ms CPU via the QuickJS interrupt handler, 32MB
+  memory, ≤512 output nodes, ≤64KB source. Violations are a publish-time
+  rejection and a render-time placeholder + warning — never a failed render.
+- **Fresh context per execution** — no state survives between renders or
+  users. Compiled modules are cached by sha256(source) like fonts.
+- **One engine everywhere**: `packages/sandbox` wraps QuickJS-WASM with the
+  limits and marshalling, and runs identically in the renderer (Node) and the
+  editor (browser) — preview parity extends to code.
+- Definition shape: `kind: "code"` + `code` (source string) alongside the
+  usual `{id, title, frame, props}`; `nodes` optional as a static palette
+  preview. Publish validation executes the code against declared prop defaults
+  under full limits and validates the output; versions immutable as ever.
+
 Storage: clean interfaces with two implementations — in-memory (tests) and a
 file-backed JSON store (`MIB_DATA_DIR`, default `./data`, gitignored) that makes
 dev and small self-host deployments durable with zero dependencies. Postgres is
@@ -264,12 +301,16 @@ with KMS-managed keys (see SECURITY.md).
 - `GET /v1/kit` — public kit component metadata for the editor palette:
   `[{id: "kit/stat-card", title, description?, frame: {w, h}, props}]`, served
   from `packages/kit/components`.
-- Components (§7.5): `GET /v1/components` (mine: drafts + published, session);
+- Components (§7.5/§7.6): `GET /v1/components` (mine: drafts + published, session);
   `POST /v1/components` `{name, title, frame}` → draft (session; id =
   `{login}/{name}`); `PUT /v1/components/{owner}/{name}` update draft definition
   (owner only; published versions are never mutated); `POST
   /v1/components/{owner}/{name}/publish` → freezes the next immutable version
-  after renderer validation; `GET /v1/components/{owner}/{name}` metadata +
+  after renderer validation; definitions may be code components (§7.6):
+  `kind: "code"` + `code` (source ≤64 KiB, required iff kind is code) ride the
+  draft PUT and freeze at publish — `code` travels in definition payloads
+  (public once published, like nodes) while browse rows carry only `kind`;
+  `GET /v1/components/{owner}/{name}` metadata +
   latest published definition (public when published);
   `GET /v1/components/{owner}/{name}/versions/{n}` immutable definition (public);
   `DELETE /v1/components/{owner}/{name}` unlist (owner);
