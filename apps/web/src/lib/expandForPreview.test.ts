@@ -12,6 +12,8 @@ import {
   PREVIEW_BACKGROUND,
   expandForPreview,
   mergeSampleProps,
+  seriesVariant,
+  wrapCodeNodesForPreview,
 } from "./expandForPreview";
 
 function makeDef(): ComponentDefinition {
@@ -55,6 +57,91 @@ describe("mergeSampleProps", () => {
 
   it("ignores undeclared samples (stale keys fall away)", () => {
     expect("gone" in mergeSampleProps(def, { gone: "x" })).toBe(false);
+  });
+
+  it("series props sample as the declared default array, varied by seed", () => {
+    const withSeries: ComponentDefinition = {
+      ...makeDef(),
+      props: {
+        ...makeDef().props,
+        calendar: { type: "series", default: [1, 2, 3] },
+      },
+    };
+    // Seed absent/0: the default verbatim (same reference — no needless copy).
+    expect(mergeSampleProps(withSeries, {}).calendar).toEqual([1, 2, 3]);
+    // A text sample for a series prop is meaningless and ignored.
+    expect(
+      mergeSampleProps(withSeries, { calendar: "[9]" }).calendar,
+    ).toEqual([1, 2, 3]);
+    // Seeded: the deterministic variant.
+    const varied = mergeSampleProps(withSeries, {}, [], { calendar: 2 });
+    expect(varied.calendar).toEqual(seriesVariant([1, 2, 3], 2));
+  });
+});
+
+describe("seriesVariant", () => {
+  const base = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  it("seed 0 is the identity", () => {
+    expect(seriesVariant(base, 0)).toBe(base);
+  });
+
+  it("is deterministic: same (base, seed) → same output, always", () => {
+    expect(seriesVariant(base, 3)).toEqual(seriesVariant(base, 3));
+    expect(seriesVariant(base, 3)).toEqual(seriesVariant([...base], 3));
+  });
+
+  it("different seeds vary the picture", () => {
+    expect(seriesVariant(base, 1)).not.toEqual(seriesVariant(base, 2));
+  });
+
+  it("varies {count} objects and leaves other shapes untouched", () => {
+    const days = [
+      { date: "2026-01-01", count: 4 },
+      { date: "2026-01-02", label: "no count" },
+      "opaque",
+    ];
+    const out = seriesVariant(days, 5) as typeof days;
+    expect((out[0] as { date: string }).date).toBe("2026-01-01");
+    expect(typeof (out[0] as { count: number }).count).toBe("number");
+    expect(out[1]).toEqual(days[1]);
+    expect(out[2]).toBe("opaque");
+    // Pure: the base is never mutated.
+    expect((days[0] as { count: number }).count).toBe(4);
+  });
+
+  it("produces only non-negative numbers for numeric entries", () => {
+    for (const seed of [1, 2, 7, 40]) {
+      for (const v of seriesVariant(base, seed) as number[]) {
+        expect(typeof v).toBe("number");
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(Number.isFinite(v)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("wrapCodeNodesForPreview", () => {
+  it("wraps sandbox output in the frame-sized preview design, resolving props-only", () => {
+    const def = makeDef();
+    const { design, warnings } = wrapCodeNodesForPreview(
+      def,
+      { label: "Stars" },
+      [
+        { id: "t", type: "text", x: 0, y: 0, w: 100, h: 20, text: "{{props.label}}" },
+        // §7.6 consent: a data template EMITTED BY CODE must em-dash, exactly
+        // like the renderer's props-only output scope.
+        { id: "leak", type: "text", x: 0, y: 20, w: 100, h: 20, text: "{{github.stars}}" },
+      ],
+    );
+    expect(design.canvas).toEqual({
+      width: 200,
+      height: 100,
+      background: PREVIEW_BACKGROUND,
+    });
+    expect((design.nodes[0] as TextNode).text).toBe("Stars");
+    expect((design.nodes[1] as TextNode).text).toBe("—");
+    expect(warnings).toEqual(['unresolved template path "github.stars"']);
   });
 });
 

@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export type BindingKind = "string" | "number";
+export type BindingKind = "string" | "number" | "series";
 
 /**
  * A value that is EXACTLY one {{path}} template renders in Data mode; any
@@ -274,8 +274,88 @@ function Segment({
   );
 }
 
+/**
+ * Series props (§7.6) are Data-mode ONLY: a raw JSON array has no freehand
+ * input — the value is either the declared default array or a sole
+ * "{{connector.path}}" binding that resolves to the raw array at render time.
+ * So instead of the Custom | Data toggle this control shows the current state
+ * (bound chip, or "declared default · N items") plus the series-typed field
+ * picker; unbinding restores the declared default.
+ */
+export function SeriesBindingControl({
+  value,
+  defaultValue,
+  fields,
+  id,
+  onChange,
+}: {
+  /** Current instance prop value: an array, a "{{path}}" binding, or absent. */
+  value: unknown;
+  /** The component's declared default array (the unbound state). */
+  defaultValue: unknown[];
+  /** Full connector list (one shared /v1/connectors load); filtered internally. */
+  fields: ConnectorInfo[];
+  id?: string;
+  onChange: (v: unknown) => void;
+}) {
+  const bound = boundPath(value);
+  const lastConnector = useRef<string | null>(null);
+  const bindable = fields.some((c) =>
+    (c.fields ?? []).some((f) => f.type === "series"),
+  );
+  const itemCount = Array.isArray(value) ? value.length : defaultValue.length;
+
+  function pick(path: string) {
+    lastConnector.current = pathConnector(path);
+    onChange(`{{${path}}}`);
+  }
+
+  return (
+    <div className="space-y-1">
+      {bound !== null ? (
+        <span className="flex min-w-0 items-center gap-1 rounded-md bg-secondary py-0.5 pr-0.5 pl-1.5 text-secondary-foreground">
+          <ConnectorIcon
+            connector={pathConnector(bound)}
+            className="size-3 shrink-0"
+          />
+          <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
+            {pathTail(pathConnector(bound), bound)}
+          </span>
+          <button
+            type="button"
+            aria-label={`Unbind ${bound}`}
+            className="rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => onChange(defaultValue)}
+          >
+            <X className="size-3" />
+          </button>
+        </span>
+      ) : (
+        <p className="text-[10px] text-muted-foreground">
+          declared default · {itemCount} item{itemCount === 1 ? "" : "s"}
+        </p>
+      )}
+      {bindable ? (
+        <FieldSelect
+          connectors={fields}
+          kind="series"
+          value={bound ?? ""}
+          placeholder="Bind a series field…"
+          id={id}
+          defaultConnector={lastConnector.current}
+          onPick={pick}
+        />
+      ) : (
+        <p className="text-[10px] text-muted-foreground">
+          Sign in with a connector that serves series data to bind this.
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface Props {
-  kind: BindingKind;
+  kind: Exclude<BindingKind, "series">;
   value: string | number;
   onChange: (v: string | number) => void;
   /** Full connector list (one shared /v1/connectors load); filtered internally. */

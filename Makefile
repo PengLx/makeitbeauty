@@ -32,9 +32,9 @@ build:
 	cd apps/api && go build ./...
 
 test:
-	# renderer tests import @makeitbeauty/twc's and @makeitbeauty/sandbox's built
-	# output — build them first so `make test` works on a fresh clone (and in CI,
-	# whatever the order)
+	# renderer AND web tests import @makeitbeauty/twc's and @makeitbeauty/sandbox's
+	# built output — build them first so `make test` works on a fresh clone (and
+	# in CI, whatever the order)
 	pnpm --filter @makeitbeauty/twc build
 	pnpm --filter @makeitbeauty/sandbox build
 	pnpm -r test

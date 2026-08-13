@@ -336,9 +336,11 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
                   // Templates are local defs — the hover preview inlines
                   // their nodes with default props (Studio expansion) and
                   // renders through the same /v1/preview + cache machinery
-                  // as palette entries. Blank has nothing to render.
+                  // as palette entries. Blank has nothing to render; code
+                  // starters carry no static nodes (their output comes from
+                  // the sandbox), so they skip the hover preview too.
                   const seed = t.seed;
-                  if (seed === null) return button;
+                  if (seed === null || seed.nodes.length === 0) return button;
                   return (
                     <PreviewHoverCard
                       key={t.id}

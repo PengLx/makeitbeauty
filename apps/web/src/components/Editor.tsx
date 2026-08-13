@@ -121,6 +121,9 @@ export function Editor({ me, projectId, onBack }: Props) {
         id: ref,
         title: def.title,
         description: def.description,
+        // §7.6: code definitions execute on the canvas via the shared sandbox.
+        kind: def.kind,
+        code: def.code,
         frame: def.frame,
         props: def.props,
         nodes: def.nodes,

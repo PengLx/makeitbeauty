@@ -3,6 +3,7 @@ import { ArrowLeft, Check, Copy, Info, RefreshCw, Save, Upload, X } from "lucide
 import { PropsPanel } from "./PropsPanel";
 import { DesignCanvas } from "./DesignCanvas";
 import { CanvasToolbar } from "./CanvasToolbar";
+import { CodeEditorPane } from "./CodeEditorPane";
 import { Inspector } from "./Inspector";
 import { StudioPreview } from "./StudioPreview";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -393,6 +394,10 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
 
   const selectedNode = designView ? findNode(designView, selectedNodeId) : null;
   const ready = record != null && def != null && designView != null;
+  // kind "code" (§7.6): the center pane is the render-function source — the
+  // component IS one pure function, so there is no canvas to lay out. Set at
+  // creation (the New Component dialog's code starters) and immutable here.
+  const codeMode = def?.kind === "code";
   const nextVersion = (record?.latestVersion ?? 0) + 1;
   const emptyKit = useMemo(() => new Map<string, KitComponent>(), []);
 
@@ -546,6 +551,7 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
         <div className="flex min-h-0 flex-1">
           <PropsPanel
             def={def}
+            codeMode={codeMode}
             onInsertText={insertText}
             onInsertRect={insertRect}
             onAddProp={addProp}
@@ -554,18 +560,29 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
           />
 
           <div className="relative flex min-w-0 flex-1 flex-col">
-            <CanvasToolbar settings={snap} onChange={setSnap} />
-            <DesignCanvas
-              design={designView}
-              selectedId={selectedNodeId}
-              kitById={emptyKit}
-              frameLabel={`${name} · ${def.frame.w}×${def.frame.h}`}
-              snap={snap}
-              onSelect={setSelectedNodeId}
-              onPatchNode={patchNode}
-              onDeleteNode={deleteNode}
-              onCanvasResize={patchFrame}
-            />
+            {codeMode ? (
+              // §7.6 code mode: the render-function source replaces the
+              // canvas; the live sandbox preview lives in the right column.
+              <CodeEditorPane
+                code={def.code ?? ""}
+                onChange={(code) => applyDef({ ...def, code })}
+              />
+            ) : (
+              <>
+                <CanvasToolbar settings={snap} onChange={setSnap} />
+                <DesignCanvas
+                  design={designView}
+                  selectedId={selectedNodeId}
+                  kitById={emptyKit}
+                  frameLabel={`${name} · ${def.frame.w}×${def.frame.h}`}
+                  snap={snap}
+                  onSelect={setSelectedNodeId}
+                  onPatchNode={patchNode}
+                  onDeleteNode={deleteNode}
+                  onCanvasResize={patchFrame}
+                />
+              </>
+            )}
           </div>
 
           <aside className="flex w-80 shrink-0 flex-col border-l bg-card">
@@ -587,6 +604,7 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
               kit={undefined}
               connectors={propConnectors}
               propsOnly
+              codeMode={codeMode}
               canvas={designView.canvas}
               onPatch={patchNode}
               onPatchCanvas={patchFrame}

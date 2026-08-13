@@ -33,7 +33,11 @@ import {
 import { Button } from "@/components/ui/button";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
 import type { ConnectorInfo, FontList } from "@/lib/api";
-import { BindingControl, FieldSelect, type BindingKind } from "@/components/BindingControl";
+import {
+  BindingControl,
+  FieldSelect,
+  SeriesBindingControl,
+} from "@/components/BindingControl";
 import { FontPicker } from "@/components/FontPicker";
 import { TwField } from "@/components/TwField";
 import { Input } from "@/components/ui/input";
@@ -63,6 +67,11 @@ interface Props {
    */
   propsOnly?: boolean;
   /**
+   * Studio code mode (§7.6): there is no canvas to drag, so the frame
+   * panel's tip speaks the render({ frame }) contract instead.
+   */
+  codeMode?: boolean;
+  /**
    * GET /v1/fonts list for the text section's family picker (Editor). Omit
    * in the Studio: propsOnly narrows the picker to built-in families — a
    * community component must never reference a private upload (§7.5).
@@ -91,6 +100,7 @@ export function Inspector({
   kit,
   connectors,
   propsOnly,
+  codeMode,
   fonts,
   canvas,
   onPatch,
@@ -102,6 +112,7 @@ export function Inspector({
         <CanvasPanel
           canvas={canvas}
           frameMode={propsOnly ?? false}
+          codeMode={codeMode ?? false}
           onPatchCanvas={onPatchCanvas}
         />
       );
@@ -200,10 +211,12 @@ export function Inspector({
 function CanvasPanel({
   canvas,
   frameMode,
+  codeMode,
   onPatchCanvas,
 }: {
   canvas: DesignCanvasSpec;
   frameMode: boolean;
+  codeMode: boolean;
   onPatchCanvas: (patch: Partial<DesignCanvasSpec>) => void;
 }) {
   return (
@@ -251,8 +264,22 @@ function CanvasPanel({
         )}
       </Section>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Tip: drag the {frameMode ? "frame" : "canvas"}'s right or bottom edge
-        to resize it. Click a node to edit it, or insert one from the palette.
+        {codeMode ? (
+          <>
+            The frame is your render function's coordinate space —{" "}
+            <code className="font-mono text-[11px]">
+              render({"{ frame }"})
+            </code>{" "}
+            receives this size, and instances scale your output uniformly into
+            their box.
+          </>
+        ) : (
+          <>
+            Tip: drag the {frameMode ? "frame" : "canvas"}'s right or bottom
+            edge to resize it. Click a node to edit it, or insert one from the
+            palette.
+          </>
+        )}
       </p>
     </div>
   );
@@ -546,7 +573,9 @@ function InstanceSection({
  * is bindable: a BindingControl whose kind follows the kit prop type, so e.g.
  * progress-bar's percent offers exactly the number-typed connector fields.
  * The renderer accepts "{{path}}" strings for number props (mergeProps
- * coerces numeric strings), so bound values round-trip as strings.
+ * coerces numeric strings), so bound values round-trip as strings. Series
+ * props (§7.6 — raw JSON arrays, consumed by code components) are Data-mode
+ * only: bind a series-typed field, or keep the declared default array.
  */
 function PropField({
   name,
@@ -561,7 +590,19 @@ function PropField({
   connectors: ConnectorInfo[];
   onCommit: (v: unknown) => void;
 }) {
-  const kind: BindingKind = prop.type === "number" ? "number" : "string";
+  if (prop.type === "series") {
+    return (
+      <Field label={name} title={prop.description}>
+        <SeriesBindingControl
+          value={value}
+          defaultValue={Array.isArray(prop.default) ? prop.default : []}
+          fields={connectors}
+          onChange={onCommit}
+        />
+      </Field>
+    );
+  }
+  const kind = prop.type === "number" ? ("number" as const) : ("string" as const);
   const current = value ?? prop.default ?? (kind === "number" ? 0 : "");
   return (
     <Field label={name} title={prop.description}>

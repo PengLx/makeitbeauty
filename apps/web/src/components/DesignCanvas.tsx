@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { Puzzle } from "lucide-react";
 import {
@@ -13,6 +13,11 @@ import {
 } from "@/lib/design";
 import type { FragmentNode } from "@/lib/component";
 import { expandFragment, resolveCanvasText, type ConnectorData } from "@/lib/expandFragment";
+import {
+  executeCodeInstance,
+  scaleCodeNodes,
+  type CodeExecution,
+} from "@/lib/codeExpand";
 import {
   CANVAS_TEXT_DEFAULTS,
   RENDERER_TEXT_ALIGN_DEFAULT,
@@ -529,10 +534,14 @@ function nodeFrameStyle(node: {
 /**
  * Whether an instance's component definition expands on the canvas — one
  * predicate shared by CanvasNode (frame style) and InstanceBody (render
- * path) so the two can never disagree about which path a node takes.
+ * path) so the two can never disagree about which path a node takes. Code
+ * components (§7.6) expand through the sandbox whenever they carry source;
+ * declarative/native ones need declared nodes.
  */
 function expandsOnCanvas(kit: KitComponent | undefined): kit is KitComponent {
-  return !!kit && Array.isArray(kit.nodes) && kit.nodes.length > 0;
+  if (!kit) return false;
+  if (kit.kind === "code") return typeof kit.code === "string" && kit.code !== "";
+  return Array.isArray(kit.nodes) && kit.nodes.length > 0;
 }
 
 /** One node, drawn to approximate the renderer's satori tree (apps/renderer/src/tree.ts). */
@@ -719,32 +728,123 @@ function InstanceBody({
   selected: boolean;
 }) {
   const kit = kitById.get(node.component);
+  // Code components (§7.6) execute in the shared sandbox — a separate child
+  // so the async execution state never mounts for declarative instances.
+  const isCode = kit?.kind === "code" && typeof kit.code === "string" && kit.code !== "";
   // Memoized per instance: node identity only changes when this node is
   // patched, kit definitions are immutable once fetched, and connectorData
   // is fetched once per Editor mount (toggling Data/Variables swaps it
   // between the snapshot object and null).
   const expansion = useMemo(() => {
-    if (!expandsOnCanvas(kit)) return null;
+    if (isCode || !expandsOnCanvas(kit)) return null;
     // Children are positioned relative to the instance box (the CanvasNode
     // wrapper already sits at node.x/node.y), so the offset here is 0,0.
     return expandFragment(kit, node.props, { x: 0, y: 0, w: node.w, h: node.h }, connectorData);
-  }, [kit, node.props, node.w, node.h, connectorData]);
+  }, [isCode, kit, node.props, node.w, node.h, connectorData]);
 
-  if (!expansion) {
-    // Unknown/unloaded component, or a native one with no static preview.
+  if (isCode && kit) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-sky-500/50 bg-sky-500/5">
-        <span className="text-xs font-medium text-sky-400">{kit?.title ?? node.component}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">{node.component}</span>
-      </div>
+      <CodeInstanceBody
+        node={node}
+        kit={kit}
+        connectorData={connectorData}
+        selected={selected}
+      />
     );
   }
 
+  if (!expansion) {
+    // Unknown/unloaded component, or a native one with no static preview.
+    return <InstancePlaceholder title={kit?.title} component={node.component} />;
+  }
+
+  return (
+    <ExpandedInstance
+      nodes={expansion.nodes}
+      title={kit?.title ?? node.component}
+      selected={selected}
+    />
+  );
+}
+
+/**
+ * A kind "code" instance: executeRender via the SAME sandbox the renderer
+ * uses (lib/codeExpand.ts — resolved series bindings, merged props, LRU'd
+ * deterministic executions), scaled into the instance box. While executing —
+ * and on ANY sandbox failure — the dashed placeholder stands in, matching
+ * the renderer's warning + placeholder degrade (§5.7).
+ */
+function CodeInstanceBody({
+  node,
+  kit,
+  connectorData,
+  selected,
+}: {
+  node: InstanceNode;
+  kit: KitComponent;
+  connectorData: ConnectorData;
+  selected: boolean;
+}) {
+  const [execution, setExecution] = useState<CodeExecution | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Never rejects; failures settle as {ok: false}.
+    void executeCodeInstance(kit, node.props, connectorData).then((result) => {
+      if (!cancelled) setExecution(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [kit, node.props, connectorData]);
+
+  // Scaling stays outside the execution cache: the box changes live during
+  // a resize drag while the execution input (props, frame) does not.
+  const nodes = useMemo(
+    () =>
+      execution?.ok
+        ? scaleCodeNodes(execution.nodes, kit.frame, { w: node.w, h: node.h })
+        : null,
+    [execution, kit.frame, node.w, node.h],
+  );
+
+  if (!nodes) {
+    return <InstancePlaceholder title={kit.title} component={node.component} />;
+  }
+  return <ExpandedInstance nodes={nodes} title={kit.title} selected={selected} />;
+}
+
+/** Dashed placeholder — the §5.7 degrade path, shared by every instance body. */
+function InstancePlaceholder({
+  title,
+  component,
+}: {
+  title: string | undefined;
+  component: string;
+}) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-sky-500/50 bg-sky-500/5">
+      <span className="text-xs font-medium text-sky-400">{title ?? component}</span>
+      <span className="font-mono text-[10px] text-muted-foreground">{component}</span>
+    </div>
+  );
+}
+
+/** Expanded instance children + the hover/selected outline and title badge. */
+function ExpandedInstance({
+  nodes,
+  title,
+  selected,
+}: {
+  nodes: FragmentNode[];
+  title: string;
+  selected: boolean;
+}) {
   return (
     // No overflow clip: the renderer doesn't clip expanded nodes either, and
     // s = min(w/frame.w, h/frame.h) keeps in-frame content inside the box.
     <div className="pointer-events-none relative h-full w-full">
-      {expansion.nodes.map((child) => (
+      {nodes.map((child) => (
         <div key={child.id} style={nodeFrameStyle(child)}>
           <FragmentBody node={child} />
         </div>
@@ -762,7 +862,7 @@ function InstanceBody({
           selected && "opacity-100",
         )}
       >
-        {kit?.title ?? node.component}
+        {title}
       </span>
     </div>
   );

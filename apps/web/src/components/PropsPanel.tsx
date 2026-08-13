@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus, Square, Type, X } from "lucide-react";
 import {
   PROP_NAME_RE,
+  parseSeriesJson,
   propReferences,
   type ComponentDefinition,
   type ComponentPropDecl,
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -21,11 +23,23 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 interface Props {
   def: ComponentDefinition;
+  /**
+   * kind "code" (§7.6): the center pane is the render-function source, so the
+   * node quick-add row disappears (a code component's nodes come from
+   * render(); declared nodes are only an optional static palette preview) and
+   * the footer speaks the code contract.
+   */
+  codeMode?: boolean;
   onInsertText: () => void;
   onInsertRect: () => void;
   onAddProp: (name: string, decl: ComponentPropDecl) => void;
   onUpdateProp: (name: string, decl: ComponentPropDecl) => void;
   onRemoveProp: (name: string) => void;
+}
+
+/** Type-zero default when a prop switches declaration type. */
+function zeroDefault(type: ComponentPropDecl["type"]): ComponentPropDecl["default"] {
+  return type === "number" ? 0 : type === "series" ? [] : "";
 }
 
 /**
@@ -37,6 +51,7 @@ interface Props {
  */
 export function PropsPanel({
   def,
+  codeMode,
   onInsertText,
   onInsertRect,
   onAddProp,
@@ -56,10 +71,7 @@ export function PropsPanel({
 
   function addProp() {
     if (!canAdd) return;
-    onAddProp(newName, {
-      type: newType,
-      default: newType === "number" ? 0 : "",
-    });
+    onAddProp(newName, { type: newType, default: zeroDefault(newType) });
     setNewName("");
   }
 
@@ -74,23 +86,27 @@ export function PropsPanel({
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r bg-card">
-      <div className="px-4 pt-3 pb-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Insert
-        </h2>
-      </div>
-      <div className="grid grid-cols-2 gap-2 px-3 pb-3">
-        <Button variant="outline" size="sm" onClick={onInsertText}>
-          <Type data-icon="inline-start" />
-          Text
-        </Button>
-        <Button variant="outline" size="sm" onClick={onInsertRect}>
-          <Square data-icon="inline-start" />
-          Rectangle
-        </Button>
-      </div>
+      {!codeMode && (
+        <>
+          <div className="px-4 pt-3 pb-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Insert
+            </h2>
+          </div>
+          <div className="grid grid-cols-2 gap-2 px-3 pb-3">
+            <Button variant="outline" size="sm" onClick={onInsertText}>
+              <Type data-icon="inline-start" />
+              Text
+            </Button>
+            <Button variant="outline" size="sm" onClick={onInsertRect}>
+              <Square data-icon="inline-start" />
+              Rectangle
+            </Button>
+          </div>
 
-      <Separator />
+          <Separator />
+        </>
+      )}
 
       <div className="px-4 pt-3 pb-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -123,6 +139,7 @@ export function PropsPanel({
             <SelectContent>
               <SelectItem value="string">string</SelectItem>
               <SelectItem value="number">number</SelectItem>
+              <SelectItem value="series">series</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="outline" size="sm" disabled={!canAdd} onClick={addProp}>
@@ -163,8 +180,19 @@ export function PropsPanel({
 
       <Separator />
       <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">
-        Props are the component's only inputs — designs bind their data to
-        props when they use it.
+        {codeMode ? (
+          <>
+            Props are the component's only inputs —{" "}
+            <code className="font-mono text-[10px]">render({"{ props }"})</code>{" "}
+            receives them with defaults merged; series props arrive as raw
+            arrays.
+          </>
+        ) : (
+          <>
+            Props are the component's only inputs — designs bind their data to
+            props when they use it.
+          </>
+        )}
       </p>
 
       <ConfirmDialog
@@ -216,15 +244,22 @@ function PropCard({
           onValueChange={(v) => {
             const type = v as ComponentPropDecl["type"];
             if (type === decl.type) return;
+            // Convert the default across the type switch instead of lying
+            // about it: "42" → 42, everything non-numeric → 0. Switches
+            // to/from series reset to the type's zero value — an array has
+            // no honest scalar form and vice versa.
+            const scalar = typeof decl.default === "string" || typeof decl.default === "number";
             onUpdate({
               ...decl,
               type,
-              // Convert the default across the type switch instead of lying
-              // about it: "42" → 42, everything non-numeric → 0.
               default:
-                type === "number"
-                  ? Number(decl.default) || 0
-                  : String(decl.default),
+                type === "series"
+                  ? []
+                  : !scalar
+                    ? zeroDefault(type)
+                    : type === "number"
+                      ? Number(decl.default) || 0
+                      : String(decl.default),
             });
           }}
         >
@@ -237,6 +272,7 @@ function PropCard({
           <SelectContent>
             <SelectItem value="string">string</SelectItem>
             <SelectItem value="number">number</SelectItem>
+            <SelectItem value="series">series</SelectItem>
           </SelectContent>
         </Select>
         <button
@@ -248,7 +284,13 @@ function PropCard({
           <X className="size-3.5" />
         </button>
       </div>
-      {decl.type === "number" ? (
+      {decl.type === "series" ? (
+        <SeriesDefaultEditor
+          name={name}
+          value={Array.isArray(decl.default) ? decl.default : []}
+          onCommit={(v) => onUpdate({ ...decl, default: v })}
+        />
+      ) : decl.type === "number" ? (
         <Input
           type="number"
           value={typeof decl.default === "number" ? decl.default : 0}
@@ -281,6 +323,66 @@ function PropCard({
           })
         }
       />
+    </div>
+  );
+}
+
+/**
+ * Series default (§7.6): a JSON array edited as text. Commits only VALID
+ * states (must parse to an array of ≤1024 items — the schema cap parseSeriesJson
+ * enforces); while the text is invalid the draft stays local, the error shows
+ * inline, and the declaration keeps its last good array. Blur on a valid
+ * draft resyncs the text to the committed value's canonical JSON.
+ */
+function SeriesDefaultEditor({
+  name,
+  value,
+  onCommit,
+}: {
+  name: string;
+  value: unknown[];
+  onCommit: (v: unknown[]) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? JSON.stringify(value);
+  const parsed = draft === null ? null : parseSeriesJson(draft);
+  const error = parsed !== null && !parsed.ok ? parsed.error : null;
+  const itemCount = parsed?.ok ? parsed.value.length : value.length;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground">
+          default (JSON array)
+        </span>
+        <span
+          className={`rounded border px-1 font-mono text-[9px] tabular-nums ${
+            error ? "text-destructive" : "text-muted-foreground"
+          }`}
+        >
+          {itemCount} item{itemCount === 1 ? "" : "s"}
+        </span>
+      </div>
+      <Textarea
+        value={text}
+        rows={3}
+        spellCheck={false}
+        aria-label={`Series default for ${name}`}
+        aria-invalid={error !== null}
+        placeholder='[0, 3, 7] or [{"date":"2026-01-01","count":4}]'
+        className={`min-h-0 font-mono text-[10px] leading-snug ${
+          error ? "border-destructive/60" : ""
+        }`}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          const res = parseSeriesJson(e.target.value);
+          if (res.ok) onCommit(res.value);
+        }}
+        onBlur={() => {
+          if (error === null) setDraft(null); // resync to canonical JSON
+        }}
+      />
+      {error && <p className="text-[10px] text-destructive">{error}</p>}
     </div>
   );
 }

@@ -43,6 +43,52 @@ import type { DesignDoc } from "./design";
 import type { ComponentDefinition, FragmentNode } from "./component";
 import { applyComputed, resolveDeep } from "./expandFragment";
 
+/**
+ * 32-bit integer hash (a finalizer round of MurmurHash3) — the deterministic
+ * "entropy" behind sample-series variations. The sandbox forbids Math.random
+ * by construction; the sample bar honours the same rule so the preview stays
+ * reproducible: the same randomize-counter always shows the same picture.
+ */
+export function hash32(x: number): number {
+  let h = x | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/**
+ * A deterministic variation of a declared series default, for the Studio's
+ * "randomize sample" button. seed 0 is the identity (the declared default);
+ * any other seed varies numeric entries — bare numbers and {count} objects,
+ * the §7.6 series shapes — through hash32, leaving everything else (dates,
+ * labels, unknown shapes) untouched. Pure: (base, seed) → the same output,
+ * always.
+ */
+export function seriesVariant(base: unknown[], seed: number): unknown[] {
+  if (seed === 0) return base;
+  const varied = (n: number, h: number): number => {
+    if (h % 7 === 0) return 0; // some entries go quiet
+    return Math.max(0, Math.round(((h % 100) / 50) * Math.max(n, 1)));
+  };
+  return base.map((item, i) => {
+    const h = hash32(Math.imul(seed, 0x9e3779b1) + i);
+    if (typeof item === "number") return varied(item, h);
+    if (
+      item !== null &&
+      typeof item === "object" &&
+      !Array.isArray(item) &&
+      typeof (item as Record<string, unknown>).count === "number"
+    ) {
+      return {
+        ...(item as Record<string, unknown>),
+        count: varied((item as Record<string, number>).count, h),
+      };
+    }
+    return item;
+  });
+}
+
 /** Background matches the Studio's frame chrome; §7.5 preview design spec. */
 export const PREVIEW_BACKGROUND = "#0d1117";
 
@@ -58,16 +104,26 @@ export interface ExpandedPreview {
  * warns and falls back to the declared default; string props stringify.
  * Undeclared samples are ignored (the Studio never produces them; stale keys
  * after a prop rename/delete just fall away).
+ *
+ * Series props (§7.6) have no text input — their sample IS the declared
+ * default array, optionally varied deterministically by `seriesSeeds` (the
+ * randomize-sample counter; 0/absent = the default verbatim). In template
+ * scopes an array value resolves like production: {{props.x}} of a series
+ * warns and em-dashes — only code consumes the raw array.
  */
 export function mergeSampleProps(
   def: ComponentDefinition,
   samples: Record<string, string>,
   warnings: string[] = [],
-): Record<string, string | number> {
-  const merged: Record<string, string | number> = {};
+  seriesSeeds: Record<string, number> = {},
+): Record<string, string | number | unknown[]> {
+  const merged: Record<string, string | number | unknown[]> = {};
   for (const [name, decl] of Object.entries(def.props)) {
     const raw = samples[name];
-    if (raw === undefined) {
+    if (decl.type === "series") {
+      const base = Array.isArray(decl.default) ? decl.default : [];
+      merged[name] = seriesVariant(base, seriesSeeds[name] ?? 0);
+    } else if (raw === undefined) {
       merged[name] = decl.default;
     } else if (decl.type === "number") {
       const num = raw.trim() === "" ? NaN : Number(raw);
@@ -116,6 +172,40 @@ export function expandForPreview(
     return copy;
   });
 
+  return {
+    design: {
+      version: 0,
+      canvas: {
+        width: def.frame.w,
+        height: def.frame.h,
+        background: PREVIEW_BACKGROUND,
+      },
+      nodes,
+    },
+    warnings,
+  };
+}
+
+/**
+ * Wrap a code draft's SANDBOX OUTPUT into the same plain preview design.
+ * Mirrors the renderer's expandCodeInstance treatment for the Studio's
+ * s = 1 / (0,0) case: output nodes resolve against a PROPS-ONLY scope (§7.6
+ * consent — code's output gets no more data than the code itself; any
+ * {{connector.*}} a render function emits em-dashes exactly like production),
+ * computed is skipped (schema-forbidden for kind "code"), scaleAndOffset is
+ * the identity. Output structure is NOT validated here — the design goes
+ * through POST /v1/preview, whose renderer-side validation 400s with the
+ * author-facing message the error panel surfaces verbatim.
+ */
+export function wrapCodeNodesForPreview(
+  def: ComponentDefinition,
+  props: Record<string, unknown>,
+  rawNodes: unknown[],
+): ExpandedPreview {
+  const warnings: string[] = [];
+  const nodes = rawNodes.map(
+    (raw) => resolveDeep(raw, { props }, warnings, "all") as FragmentNode,
+  );
   return {
     design: {
       version: 0,

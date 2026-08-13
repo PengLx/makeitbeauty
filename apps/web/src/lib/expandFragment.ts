@@ -234,7 +234,7 @@ export function applyComputed(
   node: FragmentNode,
   fragmentId: string,
   computed: ComputedEntry[] | undefined,
-  props: Record<string, string | number>,
+  props: Record<string, unknown>,
 ): void {
   for (const entry of computed ?? []) {
     if (entry.node !== fragmentId) continue;

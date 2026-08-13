@@ -3,7 +3,7 @@ import type { ComputedEntry, FragmentNode } from "@/lib/component";
 
 /** Kit palette metadata per architecture.md §8: GET /v1/kit. */
 export interface KitProp {
-  type: "string" | "number" | "color";
+  type: "string" | "number" | "color" | "series" | (string & {});
   description?: string;
   default?: unknown;
 }
@@ -13,6 +13,14 @@ export interface KitComponent {
   id: string;
   title: string;
   description?: string;
+  /**
+   * Component variant (§7.6): "code" executes `code` in the sandbox; absent/
+   * "declarative" renders the declared nodes. Rides on /v1/kit entries and on
+   * user definitions merged into the Editor's component lookup.
+   */
+  kind?: "declarative" | "code";
+  /** kind "code" only: the render({props, frame}) source (public like nodes). */
+  code?: string;
   /**
    * Palette-menu group slug (schema `category`, omitted when absent).
    * lib/paletteMenu.ts sorts unknown/missing categories into "other".

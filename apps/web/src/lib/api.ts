@@ -421,6 +421,10 @@ export async function updateComponent(
       description: definition.description,
       // Optional palette-menu slug; undefined/"" both mean "clear it".
       category: definition.category,
+      // §7.6 code surface: kind rides only when set; the API forbids `code`
+      // (even "") unless kind is "code", so it serializes away otherwise.
+      kind: definition.kind,
+      code: definition.kind === "code" ? definition.code : undefined,
       frame: definition.frame,
       props: definition.props,
       nodes: definition.nodes,

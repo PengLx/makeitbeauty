@@ -1,12 +1,16 @@
 /**
  * The starter templates are teaching material — these tests pin the
  * invariants that make them trustworthy: schema-shaped, props-only,
- * warning-free tw, inside the frame, exactly one animation each.
+ * warning-free tw, inside the frame, exactly one animation each. The §7.6
+ * code starters get the REAL publish gate instead: compiled and executed in
+ * the actual sandbox against their declared defaults, twice, byte-compared —
+ * a starter that cannot publish must never ship.
  */
 import { describe, expect, it } from "vitest";
 import { compileTw } from "@makeitbeauty/twc";
+import { compileComponent, executeRender } from "@makeitbeauty/sandbox";
 import { COMPONENT_TEMPLATES, seedDefinition } from "./componentTemplates";
-import { TEMPLATE_RE } from "./component";
+import { CODE_MAX_BYTES, SERIES_MAX_ITEMS, TEMPLATE_RE, utf8ByteLength } from "./component";
 import { ANIMATION_PRESETS } from "./design";
 
 /** Schema nodeBase id pattern (design.schema.json). */
@@ -14,7 +18,12 @@ const NODE_ID_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
 const PRESETS = new Set(ANIMATION_PRESETS.map((p) => p.value));
 
-const seededTemplates = COMPONENT_TEMPLATES.filter((t) => t.seed != null);
+const seededTemplates = COMPONENT_TEMPLATES.filter(
+  (t) => t.seed != null && t.seed.kind !== "code",
+);
+const codeTemplates = COMPONENT_TEMPLATES.filter(
+  (t) => t.seed?.kind === "code",
+);
 
 /** Every {{...}} path in every string of a value, collected recursively. */
 function templatePaths(value: unknown, out: string[] = []): string[] {
@@ -33,18 +42,21 @@ function templatePaths(value: unknown, out: string[] = []): string[] {
 }
 
 describe("COMPONENT_TEMPLATES", () => {
-  it("offers Blank first, then three seeded starters", () => {
+  it("offers Blank first, three declarative starters, then two code starters", () => {
     expect(COMPONENT_TEMPLATES.map((t) => t.id)).toEqual([
       "blank",
       "gradient-banner",
       "stat-card",
       "badge",
+      "code-heatmap",
+      "code-blank",
     ]);
     expect(COMPONENT_TEMPLATES[0].seed).toBeNull();
     expect(seededTemplates).toHaveLength(3);
+    expect(codeTemplates).toHaveLength(2);
   });
 
-  it.each(seededTemplates.map((t) => [t.id, t] as const))(
+  it.each([...seededTemplates, ...codeTemplates].map((t) => [t.id, t] as const))(
     "%s: every tw string (nodes + swatch) compiles warning-free",
     (_id, t) => {
       const strings = [t.swatchTw, ...t.seed!.nodes.map((n) => n.tw ?? "")];
@@ -120,6 +132,88 @@ describe("COMPONENT_TEMPLATES", () => {
       }
     },
   );
+});
+
+describe("code starter templates (§7.6)", () => {
+  const cases = codeTemplates.map((t) => [t.id, t] as const);
+
+  it.each(cases)(
+    "%s: seeds kind code, source under the 64 KiB cap, no static nodes",
+    (_id, t) => {
+      expect(t.seed!.kind).toBe("code");
+      const code = t.seed!.code ?? "";
+      expect(code.length).toBeGreaterThan(0);
+      expect(utf8ByteLength(code)).toBeLessThanOrEqual(CODE_MAX_BYTES);
+      // Code starters carry no static palette preview — render() is the truth.
+      expect(t.seed!.nodes).toEqual([]);
+    },
+  );
+
+  it.each(cases)(
+    "%s: prop defaults match their declared types (series = bounded arrays)",
+    (_id, t) => {
+      for (const [name, decl] of Object.entries(t.seed!.props)) {
+        if (decl.type === "series") {
+          expect(Array.isArray(decl.default), name).toBe(true);
+          expect((decl.default as unknown[]).length, name).toBeLessThanOrEqual(
+            SERIES_MAX_ITEMS,
+          );
+        } else {
+          expect(typeof decl.default, name).toBe(decl.type);
+        }
+      }
+    },
+  );
+
+  it.each(cases)("%s: compiles in the real sandbox", async (_id, t) => {
+    const result = await compileComponent(t.seed!.code ?? "");
+    expect(result.ok, result.ok ? "" : result.message).toBe(true);
+  });
+
+  // The exact publish gate (renderer runCodePublishChecks): execute twice
+  // against the declared defaults under full limits, byte-compare — proving
+  // the starters ALWAYS publish.
+  it.each(cases)(
+    "%s: executes deterministically against its declared defaults",
+    async (_id, t) => {
+      const props = Object.fromEntries(
+        Object.entries(t.seed!.props).map(([name, decl]) => [name, decl.default]),
+      );
+      const input = { props, frame: t.frame };
+      const first = await executeRender(t.seed!.code ?? "", input);
+      const second = await executeRender(t.seed!.code ?? "", input);
+      expect(JSON.stringify(first.nodes)).toBe(JSON.stringify(second.nodes));
+      expect(first.warnings).toEqual([]); // starters must not ship debug noise
+      expect(first.nodes.length).toBeGreaterThan(0);
+      expect(first.nodes.length).toBeLessThanOrEqual(512);
+      // Renderable fragment shapes, laid out inside the template frame.
+      const ids = new Set<string>();
+      for (const raw of first.nodes) {
+        const node = raw as Record<string, unknown>;
+        expect(["text", "rect", "image"]).toContain(node.type);
+        expect(node.id).toMatch(NODE_ID_RE);
+        ids.add(node.id as string);
+        const [x, y, w, h] = [node.x, node.y, node.w, node.h] as number[];
+        for (const v of [x, y, w, h]) expect(typeof v).toBe("number");
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(x + w).toBeLessThanOrEqual(t.frame.w);
+        expect(y + h).toBeLessThanOrEqual(t.frame.h);
+      }
+      expect(ids.size).toBe(first.nodes.length); // unique ids (publish gate)
+    },
+  );
+
+  it("seedDefinition materializes kind + code onto code drafts only", () => {
+    const heatmap = codeTemplates[0];
+    const def = seedDefinition(heatmap, "me/heat", "Heat")!;
+    expect(def.kind).toBe("code");
+    expect(def.code).toBe(heatmap.seed!.code);
+
+    const banner = seedDefinition(COMPONENT_TEMPLATES[1], "me/hero", "Hero")!;
+    expect(banner.kind).toBeUndefined();
+    expect(banner.code).toBeUndefined();
+  });
 });
 
 describe("seedDefinition", () => {
