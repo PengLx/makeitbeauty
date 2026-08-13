@@ -7,8 +7,10 @@ import {
   AlignEndVertical,
   AlignStartHorizontal,
   AlignStartVertical,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
+import { containsTemplate } from "@/lib/expandFragment";
 import {
   type DesignAnimation,
   type DesignCanvasSpec,
@@ -112,7 +114,18 @@ export function Inspector({
   return (
     <div className="flex-1 space-y-4 overflow-y-auto p-4">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-xs text-muted-foreground">{node.id}</span>
+        <span className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
+          {node.id}
+          {/* Why the canvas may show different text than the field below:
+              the node carries {{...}} bindings — the canvas can display
+              resolved data while this panel always edits the raw template. */}
+          {node.type === "text" && containsTemplate(node.text) && (
+            <span title="Contains data bindings — the canvas can show resolved values; this panel edits the raw template">
+              <Zap className="size-3 text-amber-400" aria-hidden />
+              <span className="sr-only">contains data bindings</span>
+            </span>
+          )}
+        </span>
         <span className="rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] uppercase text-secondary-foreground">
           {node.type}
         </span>

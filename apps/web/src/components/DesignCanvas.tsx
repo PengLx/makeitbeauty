@@ -12,7 +12,7 @@ import {
   type TextNode,
 } from "@/lib/design";
 import type { FragmentNode } from "@/lib/component";
-import { expandFragment } from "@/lib/expandFragment";
+import { expandFragment, resolveCanvasText, type ConnectorData } from "@/lib/expandFragment";
 import {
   CANVAS_TEXT_DEFAULTS,
   RENDERER_TEXT_ALIGN_DEFAULT,
@@ -63,6 +63,15 @@ interface Props {
    * snapping live — pointermove's own shiftKey is read every move.
    */
   snap: SnapSettings;
+  /**
+   * Merged connector snapshots for the live-data display (Editor with the
+   * Data toggle active): {{connector.*}} templates in text nodes and
+   * expanded instances render RESOLVED values — production's view, missing
+   * paths em-dash. null/omitted (Studio always; Editor in Variables mode or
+   * with no data) keeps templates literal. Display-only: hit-testing,
+   * selection and every editing surface still see the raw template text.
+   */
+  connectorData?: ConnectorData;
   onSelect: (id: string | null) => void;
   onPatchNode: (id: string, patch: Partial<DesignNode>) => void;
   onDeleteNode: (id: string) => void;
@@ -172,6 +181,7 @@ export function DesignCanvas({
   kitById,
   frameLabel,
   snap,
+  connectorData = null,
   onSelect,
   onPatchNode,
   onDeleteNode,
@@ -371,6 +381,7 @@ export function DesignCanvas({
             key={node.id}
             node={node}
             kitById={kitById}
+            connectorData={connectorData}
             selected={node.id === selectedId}
             onPointerDown={(e) => beginDrag(e, node.id, "move")}
             onPointerMove={handlePointerMove}
@@ -487,6 +498,7 @@ export function DesignCanvas({
 interface NodeProps {
   node: DesignNode;
   kitById: Map<string, KitComponent>;
+  connectorData: ConnectorData;
   selected: boolean;
   onPointerDown: (e: PointerEvent) => void;
   onPointerMove: (e: PointerEvent) => void;
@@ -523,7 +535,7 @@ function expandsOnCanvas(kit: KitComponent | undefined): kit is KitComponent {
 }
 
 /** One node, drawn to approximate the renderer's satori tree (apps/renderer/src/tree.ts). */
-function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onPointerEnd }: NodeProps) {
+function CanvasNode({ node, kitById, connectorData, selected, onPointerDown, onPointerMove, onPointerEnd }: NodeProps) {
   // Renderer parity (kit.ts expandInstance): expansion reads ONLY the
   // instance's x/y/w/h — instance opacity/rotation never reach production
   // output, so painting them here would preview an effect the renderer
@@ -542,7 +554,7 @@ function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onP
       className={cn("group cursor-move touch-none select-none", !selected && "hover:ring-1 hover:ring-sky-500/40")}
       style={nodeFrameStyle(expands ? { ...node, opacity: undefined, rotation: undefined } : node)}
     >
-      <NodeBody node={node} kitById={kitById} selected={selected} />
+      <NodeBody node={node} kitById={kitById} connectorData={connectorData} selected={selected} />
     </div>
   );
 }
@@ -550,21 +562,30 @@ function CanvasNode({ node, kitById, selected, onPointerDown, onPointerMove, onP
 function NodeBody({
   node,
   kitById,
+  connectorData,
   selected,
 }: {
   node: DesignNode;
   kitById: Map<string, KitComponent>;
+  connectorData: ConnectorData;
   selected: boolean;
 }) {
   switch (node.type) {
     case "text":
-      return <TextBody node={node} />;
+      return <TextBody node={node} data={connectorData} />;
     case "rect":
       return <RectBody node={node} />;
     case "image":
       return <ImageBody node={node} />;
     case "instance":
-      return <InstanceBody node={node} kitById={kitById} selected={selected} />;
+      return (
+        <InstanceBody
+          node={node}
+          kitById={kitById}
+          connectorData={connectorData}
+          selected={selected}
+        />
+      );
   }
 }
 
@@ -574,7 +595,14 @@ function NodeBody({
 // and shadows show up live while the Inspector's structured edits still win.
 // The API-rendered preview stays the truth; this is only an approximation.
 
-function TextBody({ node }: { node: TextNode }) {
+/**
+ * `data` drives the live-data display for PLAIN text nodes: with connector
+ * data present, {{templates}} render resolved (resolveCanvasText — the
+ * renderer's node.text treatment, missing paths em-dash); with null they stay
+ * literal. Expanded fragment children pass no data — expandFragment already
+ * resolved their text, so display is a pass-through either way.
+ */
+function TextBody({ node, data }: { node: TextNode; data?: ConnectorData }) {
   const s = node.style ?? {};
   const align = s.align ?? RENDERER_TEXT_ALIGN_DEFAULT;
   return (
@@ -602,7 +630,7 @@ function TextBody({ node }: { node: TextNode }) {
         },
       )}
     >
-      {node.text}
+      {resolveCanvasText(node.text, data)}
     </div>
   );
 }
@@ -654,8 +682,9 @@ function RectBody({ node }: { node: RectNode }) {
  * renderer's expandInstance mirrored client-side — so intra-component layout
  * (padding, text, computed geometry) is visible while editing, closing the
  * canvas↔preview gap. {{props.*}} resolves against the instance's props;
- * data templates ({{github.*}}) stay literal — data preview is the
- * API-rendered preview panel's job.
+ * data templates ({{github.*}}) resolve against connectorData when the
+ * live-data display is active (expandFragment's data mode — the renderer's
+ * scope, missing paths em-dash) and stay literal otherwise.
  *
  * NATIVE components (kit `native: true`) draw their declared STATIC PREVIEW
  * nodes — an approximation BY DESIGN: the real nodes come from the
@@ -676,21 +705,25 @@ function RectBody({ node }: { node: RectNode }) {
 function InstanceBody({
   node,
   kitById,
+  connectorData,
   selected,
 }: {
   node: InstanceNode;
   kitById: Map<string, KitComponent>;
+  connectorData: ConnectorData;
   selected: boolean;
 }) {
   const kit = kitById.get(node.component);
   // Memoized per instance: node identity only changes when this node is
-  // patched, and kit definitions are immutable once fetched.
+  // patched, kit definitions are immutable once fetched, and connectorData
+  // is fetched once per Editor mount (toggling Data/Variables swaps it
+  // between the snapshot object and null).
   const expansion = useMemo(() => {
     if (!expandsOnCanvas(kit)) return null;
     // Children are positioned relative to the instance box (the CanvasNode
     // wrapper already sits at node.x/node.y), so the offset here is 0,0.
-    return expandFragment(kit, node.props, { x: 0, y: 0, w: node.w, h: node.h });
-  }, [kit, node.props, node.w, node.h]);
+    return expandFragment(kit, node.props, { x: 0, y: 0, w: node.w, h: node.h }, connectorData);
+  }, [kit, node.props, node.w, node.h, connectorData]);
 
   if (!expansion) {
     // Unknown/unloaded component, or a native one with no static preview.

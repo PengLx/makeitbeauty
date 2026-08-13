@@ -291,3 +291,33 @@ func (s *Server) handleConnectors(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// ---- GET /v1/connectors/data ---------------------------------------------
+// Session auth (wrapped by requireSession). The session user's merged
+// UNFILTERED snapshots for every registered connector, keyed by connector
+// name ({"github": {...}}), served through the same SnapshotCache renders
+// use. It powers the editor canvas's live-data display.
+//
+// Unfiltered is deliberate: the bindings filter (resolveBindingData) is a
+// PUBLISH boundary — it scopes what a rendered image may publicly display —
+// not a self-view one. This endpoint only ever shows the session user their
+// own connector data, so nothing is withheld here.
+
+func (s *Server) handleConnectorData(w http.ResponseWriter, r *http.Request) {
+	uid := userID(r)
+	data := map[string]any{}
+	for _, name := range s.cache.KnownConnectors() {
+		// Missing accounts resolve to nil, exactly like render: the connector
+		// serves its no-credential path (the dev fixture for github).
+		account := s.resolveAccount(r, uid, store.Binding{Connector: name})
+		snapshot, err := s.cache.Snapshot(r.Context(), uid, name, account)
+		if err != nil {
+			// Upstream failure: omit this connector rather than failing the
+			// request — the canvas degrades to literal templates for it.
+			s.log.Warn("connector data unavailable", "connector", name, "err", err)
+			continue
+		}
+		data[name] = snapshot
+	}
+	writeJSON(w, http.StatusOK, data)
+}

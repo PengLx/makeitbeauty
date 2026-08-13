@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { ComponentDefinition } from "./component";
 import type { RectNode, TextNode, ImageNode } from "./design";
 import {
+  containsTemplate,
   expandFragment,
   mergeInstanceProps,
+  resolveCanvasText,
+  PLACEHOLDER,
   type ExpandableDefinition,
 } from "./expandFragment";
 
@@ -134,6 +137,114 @@ describe("expandFragment — template resolution", () => {
     const before = structuredClone(def);
     expandFragment(def, { pct: 90 }, { x: 5, y: 5, w: 100, h: 50 });
     expect(def).toEqual(before);
+  });
+});
+
+// The merged /v1/connectors/data shape the live-data display resolves against.
+const DATA = {
+  github: {
+    user: { login: "octocat", followers: 42 },
+    stats: { totalStars: 7 },
+  },
+};
+
+describe("resolveCanvasText — plain text node display", () => {
+  it("resolves {{connector.*}} against the fetched data (display: data)", () => {
+    expect(resolveCanvasText("Hi {{github.user.login}}!", DATA)).toBe("Hi octocat!");
+    expect(resolveCanvasText("{{github.user.followers}} followers", DATA)).toBe("42 followers");
+  });
+
+  it("keeps templates literal with null data (signed out / fetch failed / Variables toggle)", () => {
+    expect(resolveCanvasText("Hi {{github.user.login}}!", null)).toBe(
+      "Hi {{github.user.login}}!",
+    );
+    expect(resolveCanvasText("Hi {{github.user.login}}!", undefined)).toBe(
+      "Hi {{github.user.login}}!",
+    );
+  });
+
+  it("em-dashes missing paths — the renderer's template.ts semantics for node.text", () => {
+    // Parity contract: apps/renderer/src/template.ts substitutes an em dash
+    // for missing/non-scalar paths, never failing. PLACEHOLDER mirrors its
+    // constant verbatim.
+    expect(PLACEHOLDER).toBe("—");
+    expect(resolveCanvasText("{{github.nope.deep}}", DATA)).toBe(PLACEHOLDER);
+    // Outside instances there is no props scope — production em-dashes these
+    // too, and so does the canvas display.
+    expect(resolveCanvasText("{{props.label}}", DATA)).toBe(PLACEHOLDER);
+    // Non-scalar values are placeholders as well, not JSON dumps.
+    expect(resolveCanvasText("{{github.user}}", DATA)).toBe(PLACEHOLDER);
+  });
+
+  it("is a pass-through for text without templates", () => {
+    expect(resolveCanvasText("plain text", DATA)).toBe("plain text");
+  });
+});
+
+describe("containsTemplate — the Inspector's binding badge predicate", () => {
+  it("detects {{...}} anywhere in the string (and is stateful-regex safe)", () => {
+    expect(containsTemplate("stars: {{github.stats.totalStars}}")).toBe(true);
+    // Twice in a row: a naive /g regex test would alternate true/false.
+    expect(containsTemplate("stars: {{github.stats.totalStars}}")).toBe(true);
+    expect(containsTemplate("no bindings here")).toBe(false);
+    expect(containsTemplate("half {{open")).toBe(false);
+  });
+});
+
+describe("expandFragment — live-data display (data mode)", () => {
+  it("resolves {{connector.*}} inside fragments against the data scope", () => {
+    const { nodes, warnings } = expandFragment(makeDef(), {}, IDENTITY, {
+      github: { stars: 123 },
+    });
+    const title = nodes.find((n) => n.id === "title") as TextNode;
+    expect(title.text).toBe("hello · 123");
+    expect(warnings).toEqual([]);
+  });
+
+  it("combines {{props.*}} and {{connector.*}} in one string — the renderer's {...data, props} scope", () => {
+    const { nodes } = expandFragment(makeDef(), { label: "Stars" }, IDENTITY, {
+      github: { stars: 123 },
+    });
+    const title = nodes.find((n) => n.id === "title") as TextNode;
+    expect(title.text).toBe("Stars · 123");
+  });
+
+  it("resolves the instance's own prop values against data BEFORE merge (pipeline order)", () => {
+    // A number prop bound to "{{github.user.followers}}" must resolve to
+    // "42" first so mergeProps' numeric-string coercion accepts it —
+    // template.ts resolveNodeTemplates runs before kit.ts mergeProps.
+    const { nodes, warnings } = expandFragment(
+      makeDef(),
+      { pct: "{{github.user.followers}}", label: "{{github.user.login}}" },
+      IDENTITY,
+      DATA,
+    );
+    const bar = nodes.find((n) => n.id === "bar") as RectNode;
+    expect(bar.w).toBeCloseTo(42 * 1.8);
+    const title = nodes.find((n) => n.id === "title") as TextNode;
+    expect(title.text).toBe("octocat · —");
+    expect(warnings).toEqual(['unresolved template path "github.stars"']);
+  });
+
+  it("em-dashes missing data paths with a warning instead of leaving them literal", () => {
+    const { nodes, warnings } = expandFragment(makeDef(), {}, IDENTITY, DATA);
+    const title = nodes.find((n) => n.id === "title") as TextNode;
+    expect(title.text).toBe(`hello · ${PLACEHOLDER}`);
+    expect(warnings).toEqual(['unresolved template path "github.stars"']);
+  });
+
+  it("with null data behaves exactly like the props-only canvas (templates literal)", () => {
+    const withNull = expandFragment(makeDef(), { label: "Stars" }, IDENTITY, null);
+    const without = expandFragment(makeDef(), { label: "Stars" }, IDENTITY);
+    expect(withNull).toEqual(without);
+    const title = withNull.nodes.find((n) => n.id === "title") as TextNode;
+    expect(title.text).toBe("Stars · {{github.stars}}");
+  });
+
+  it("does not mutate the given props (resolution copies)", () => {
+    const props = { label: "{{github.user.login}}" };
+    expandFragment(makeDef(), props, IDENTITY, DATA);
+    expect(props).toEqual({ label: "{{github.user.login}}" });
   });
 });
 

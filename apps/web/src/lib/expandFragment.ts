@@ -17,14 +17,17 @@
  *
  * Two template modes exist because two consumers need different scopes:
  *
- * - "all" (Studio preview): every path resolves against the given scope;
- *   missing/non-scalar paths warn and render an em dash — template.ts
- *   semantics verbatim. The Studio's scope carries only {props}, so anything
- *   else em-dashes, surfacing the publish-time props-only rule early.
- * - "props-only" (canvas): only {{props.*}} resolves; any other template
- *   ({{github.stars}}, …) stays LITERAL in the output. The canvas has no
- *   connector data — data preview is the API-rendered preview panel's job —
- *   so showing the raw binding text is honest, not a failure.
+ * - "all" (Studio preview + the canvas's live-data display): every path
+ *   resolves against the given scope; missing/non-scalar paths warn and
+ *   render an em dash — template.ts semantics verbatim. The Studio's scope
+ *   carries only {props}, so anything else em-dashes, surfacing the
+ *   publish-time props-only rule early. The Editor canvas with connector
+ *   data loaded (GET /v1/connectors/data) passes {...data, props} — the
+ *   renderer's expandInstance scope — so {{github.*}} shows live values.
+ * - "props-only" (canvas without data / Variables display): only {{props.*}}
+ *   resolves; any other template ({{github.stars}}, …) stays LITERAL in the
+ *   output. With no connector data (signed out, fetch failed, Variables
+ *   toggle) showing the raw binding text is honest, not a failure.
  *
  * Node ids are kept verbatim (the renderer prefixes "{instanceId}__" purely
  * for cross-instance uniqueness on one flat canvas; the canvas renders each
@@ -41,6 +44,33 @@ export const PLACEHOLDER = "—"; // em dash
 const TEMPLATE_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
 export type TemplateMode = "all" | "props-only";
+
+/**
+ * The merged connector data the canvas resolves against — the shape of
+ * GET /v1/connectors/data ({"github": {...}}). null means "no data": signed
+ * out, fetch failed, or the Variables display toggle is active.
+ */
+export type ConnectorData = Record<string, unknown> | null;
+
+/** True when a string contains at least one {{...}} template reference. */
+export function containsTemplate(value: string): boolean {
+  TEMPLATE_RE.lastIndex = 0; // the shared regex is /g — reset between uses
+  return TEMPLATE_RE.test(value);
+}
+
+/**
+ * Resolve a plain (non-instance) text node's content for canvas display.
+ * With connector data: template.ts semantics verbatim against that data —
+ * exactly what production does to node.text, so {{github.user.login}} shows
+ * the live value and a missing path shows the renderer's em dash. Without
+ * data the text passes through untouched (templates stay literal).
+ * Warnings are discarded: this is display-only — the API preview surfaces
+ * render warnings.
+ */
+export function resolveCanvasText(text: string, data: ConnectorData | undefined): string {
+  if (data == null || !containsTemplate(text)) return text;
+  return resolveTemplate(text, data, [], "all");
+}
 
 /**
  * The minimal definition shape the expansion needs — satisfied by both the
@@ -251,8 +281,18 @@ export function scaleAndOffset(node: FragmentNode, s: number, dx: number, dy: nu
 /**
  * Expand a component definition into plain nodes positioned inside (and
  * scaled to) `instanceFrame`, per the module comment — the renderer's
- * expandInstance for one instance, minus data resolution ("props-only" mode
- * keeps data templates literal) and minus id prefixing (ids stay verbatim).
+ * expandInstance for one instance, minus id prefixing (ids stay verbatim).
+ *
+ * `data` selects the template treatment:
+ * - null/undefined (Studio, or the Editor without data): "props-only" —
+ *   {{props.*}} resolves against the merged props, data templates stay
+ *   LITERAL.
+ * - connector data (the Editor's live-data display): the renderer's exact
+ *   pipeline order — the instance's OWN prop values resolve against `data`
+ *   first (template.ts resolveNodeTemplates: a prop bound to
+ *   "{{github.user.followers}}" becomes "42" BEFORE number coercion), then
+ *   fragments resolve in "all" mode against {...data, props} (kit.ts
+ *   expandInstance's scope), so missing paths em-dash like production.
  *
  * The Studio's expandForPreview does NOT route through this function: its
  * proven s = 1 shortcut skips scaleAndOffset entirely (identity except for
@@ -264,19 +304,20 @@ export function expandFragment(
   def: ExpandableDefinition,
   props: Record<string, unknown> | undefined,
   instanceFrame: InstanceFrame,
+  data?: ConnectorData,
 ): ExpandedFragment {
   const warnings: string[] = [];
-  const merged = mergeInstanceProps(def, props ?? {}, warnings);
-  const scope = { props: merged };
+  const given =
+    data == null
+      ? (props ?? {})
+      : (resolveDeep(props ?? {}, data, warnings, "all") as Record<string, unknown>);
+  const merged = mergeInstanceProps(def, given, warnings);
+  const mode: TemplateMode = data == null ? "props-only" : "all";
+  const scope = data == null ? { props: merged } : { ...data, props: merged };
   const s = Math.min(instanceFrame.w / def.frame.w, instanceFrame.h / def.frame.h);
 
   const nodes = def.nodes.map((fragment) => {
-    const copy = resolveDeep(
-      structuredClone(fragment),
-      scope,
-      warnings,
-      "props-only",
-    ) as FragmentNode;
+    const copy = resolveDeep(structuredClone(fragment), scope, warnings, mode) as FragmentNode;
     applyComputed(copy, fragment.id, def.computed, merged);
     scaleAndOffset(copy, s, instanceFrame.x, instanceFrame.y);
     return copy;

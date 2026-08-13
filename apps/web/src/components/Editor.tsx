@@ -12,6 +12,8 @@ import { SessionControls } from "./SessionControls";
 import { usePreview } from "../hooks/usePreview";
 import { useKit, type KitComponent } from "../hooks/useKit";
 import { useConnectors } from "../hooks/useConnectors";
+import { useConnectorData } from "../hooks/useConnectorData";
+import { useCanvasDisplay } from "../hooks/useCanvasDisplay";
 import { useSnapSettings } from "../hooks/useSnapSettings";
 import { useMyComponents } from "../hooks/useMyComponents";
 import { useComponentDefs } from "../hooks/useComponentDefs";
@@ -130,6 +132,11 @@ export function Editor({ me, projectId, onBack }: Props) {
   // BindingControls + the text insert picker); [] when unavailable (401, API
   // down) — Data mode disables with a sign-in hint.
   const { connectors } = useConnectors();
+  // The user's merged unfiltered snapshots for the canvas's live-data
+  // display, fetched once per Editor mount; null (signed out, API down)
+  // keeps canvas templates literal. Editor-only — the Studio is props-only
+  // by design (§7.5).
+  const connectorData = useConnectorData();
 
   // Lives at the Editor level so the preview survives tab switches. Sends the
   // CURRENT project design; null (still loading) skips rendering.
@@ -137,6 +144,8 @@ export function Editor({ me, projectId, onBack }: Props) {
 
   // Snap preferences (persisted to "mib.snap", shared with the Studio).
   const [snap, setSnap] = useSnapSettings();
+  // Canvas Data/Variables display toggle (persisted to "mib.canvasData").
+  const [canvasDisplay, setCanvasDisplay] = useCanvasDisplay();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -487,12 +496,18 @@ export function Editor({ me, projectId, onBack }: Props) {
               </TabsList>
             </div>
             <TabsContent value="design" className="relative flex min-h-0 flex-col">
-              <CanvasToolbar settings={snap} onChange={setSnap} />
+              <CanvasToolbar
+                settings={snap}
+                onChange={setSnap}
+                display={canvasDisplay}
+                onDisplayChange={setCanvasDisplay}
+              />
               <DesignCanvas
                 design={design}
                 selectedId={selectedNodeId}
                 kitById={componentsById}
                 snap={snap}
+                connectorData={canvasDisplay === "data" ? connectorData : null}
                 onSelect={setSelectedNodeId}
                 onPatchNode={patchNode}
                 onDeleteNode={deleteNode}

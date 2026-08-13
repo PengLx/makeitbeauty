@@ -183,6 +183,17 @@ export async function listConnectors(
   return Array.isArray(body) ? body : (body.connectors ?? []);
 }
 
+/**
+ * GET /v1/connectors/data — the session user's merged UNFILTERED connector
+ * snapshots, keyed by connector name ({"github": {...}}). Powers the canvas's
+ * live-data display; a connector whose upstream failed is simply absent.
+ */
+export function getConnectorData(
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  return request("/v1/connectors/data", { signal });
+}
+
 // ---- project CRUD (architecture §8) -------------------------------------
 
 export async function listProjects(signal?: AbortSignal): Promise<Project[]> {

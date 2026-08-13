@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /v1/me", s.handleMe)
 	mux.HandleFunc("GET /v1/connectors", s.requireSession(s.handleConnectors))
+	mux.HandleFunc("GET /v1/connectors/data", s.requireSession(s.handleConnectorData))
 
 	// Everything else: JSON 404 envelope instead of the default text page.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
