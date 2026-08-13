@@ -34,6 +34,7 @@ func TestComponentStoreRoundTrip(t *testing.T) {
 			component := &Component{
 				ID: "alice/glow-card", OwnerID: "u1", Title: "Glow card",
 				Description: "A glowing card.",
+				Category:    "stats",
 				Draft:       json.RawMessage(`{"id":"glow-card","title":"Glow card","frame":{"w":260,"h":140},"props":{},"nodes":[]}`),
 				CreatedAt:   now, UpdatedAt: now,
 			}
@@ -68,6 +69,7 @@ func TestComponentStoreRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			if c.OwnerID != "u1" || c.Title != "Glow card" || c.Description != "A glowing card." ||
+				c.Category != "stats" ||
 				c.LatestVersion != 1 || c.Unlisted || !c.CreatedAt.Equal(now) || !c.UpdatedAt.Equal(now.Add(time.Minute)) {
 				t.Errorf("reloaded component = %+v", c)
 			}

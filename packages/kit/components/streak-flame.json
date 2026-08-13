@@ -1,6 +1,7 @@
 {
   "id": "streak-flame",
   "title": "Streak flame",
+  "category": "data",
   "description": "Current contribution streak as a big headline number with a pulsing flame accent, plus the longest-streak record. Native component — the renderer generates the figures from stats.currentStreak / stats.longestStreak; the nodes below are the static palette preview.",
   "native": true,
   "dataFields": ["stats.currentStreak", "stats.longestStreak"],

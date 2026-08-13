@@ -13,9 +13,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
+
+// CategoryPattern constrains the optional palette-menu category slug
+// (kit-component.schema.json). Shared with the community-component write
+// validation in httpapi so kit and registry categories can never drift.
+var CategoryPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 
 // Frame is the design-time bounding box of a component.
 type Frame struct {
@@ -31,7 +37,12 @@ type Component struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
-	Frame       Frame  `json:"frame"`
+	// Category is the optional palette-menu group (lowercase slug per
+	// CategoryPattern; recommended taxonomy: cards, stats, data, banners,
+	// decor). The editor buckets uncategorized components separately, so an
+	// absent category is omitted, never "".
+	Category string `json:"category,omitempty"`
+	Frame    Frame  `json:"frame"`
 	// Props is the file's prop-declaration object, passed through verbatim.
 	Props json.RawMessage `json:"props"`
 	// Native marks a component whose nodes are produced by a trusted
@@ -135,6 +146,7 @@ func parseFile(path string) (Component, error) {
 		ID          string          `json:"id"`
 		Title       string          `json:"title"`
 		Description string          `json:"description"`
+		Category    string          `json:"category"`
 		Frame       Frame           `json:"frame"`
 		Props       json.RawMessage `json:"props"`
 		Native      bool            `json:"native"`
@@ -153,6 +165,12 @@ func parseFile(path string) (Component, error) {
 	}
 	if raw.Frame.W <= 0 || raw.Frame.H <= 0 {
 		return Component{}, fmt.Errorf("frame.w and frame.h must be positive")
+	}
+	// Mirror the schema: category is optional, but when present it must be a
+	// valid slug — a typo'd category would silently strand the component in
+	// the palette's catch-all bucket, so it is a load error instead.
+	if raw.Category != "" && !CategoryPattern.MatchString(raw.Category) {
+		return Component{}, fmt.Errorf("category %q must match %s", raw.Category, CategoryPattern)
 	}
 	// Mirror the schema's dependentRequired: native and dataFields imply
 	// each other (kit-component.schema.json).
@@ -178,6 +196,7 @@ func parseFile(path string) (Component, error) {
 		ID:          "kit/" + raw.ID,
 		Title:       raw.Title,
 		Description: raw.Description,
+		Category:    raw.Category,
 		Frame:       raw.Frame,
 		Props:       props,
 		Native:      raw.Native,

@@ -1,6 +1,7 @@
 {
   "id": "stat-trio",
   "title": "Stat trio",
+  "category": "stats",
   "description": "Three side-by-side stat cells rising in with a 0/120/240ms stagger.",
   "frame": { "w": 720, "h": 110 },
   "props": {

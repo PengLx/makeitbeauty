@@ -96,6 +96,7 @@ type Component struct {
 	OwnerID       string // User.ID of the owner
 	Title         string
 	Description   string
+	Category      string          // optional palette-menu slug ("" == uncategorized)
 	Draft         json.RawMessage // working definition (kit-component shape)
 	LatestVersion int             // 0 == never published
 	Unlisted      bool            // hidden from browse; pinned versions still serve

@@ -1,6 +1,7 @@
 {
   "id": "language-bar",
   "title": "Language bar",
+  "category": "data",
   "description": "Top languages as a stacked horizontal bar with a legend, star-weighted across owned repositories. Native component — the renderer generates the segments from stats.topLanguages; the nodes below are the static palette preview.",
   "native": true,
   "dataFields": ["stats.topLanguages"],

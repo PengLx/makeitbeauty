@@ -1,6 +1,7 @@
 {
   "id": "profile-header",
   "title": "Profile header",
+  "category": "banners",
   "description": "Name, @login and follower count with a staggered slide-up entrance.",
   "frame": { "w": 720, "h": 120 },
   "props": {

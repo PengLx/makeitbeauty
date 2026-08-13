@@ -1,6 +1,7 @@
 {
   "id": "contribution-heatmap",
   "title": "Contribution heatmap",
+  "category": "data",
   "description": "GitHub-style contribution calendar: 365 days of commit activity as a week-by-week cell grid, colored by intensity. Native component — the renderer generates the cells from stats.calendar; the nodes below are the static palette preview.",
   "native": true,
   "dataFields": ["stats.calendar"],

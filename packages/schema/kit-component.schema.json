@@ -15,6 +15,11 @@
     },
     "title": { "type": "string", "minLength": 1, "maxLength": 100 },
     "description": { "type": "string", "maxLength": 1000 },
+    "category": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,23}$",
+      "description": "Optional palette-menu category, a lowercase slug. The editor groups components under it and treats uncategorized components as a catch-all bucket. Recommended taxonomy (official kit uses exactly these): cards (framed containers/showcases), stats (single-number metrics and meters), data (array-driven connector visuals), banners (wide text/header strips), decor (dividers and ornaments)."
+    },
     "frame": {
       "type": "object",
       "additionalProperties": false,

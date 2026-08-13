@@ -1,6 +1,7 @@
 {
   "id": "progress-bar",
   "title": "Progress bar",
+  "category": "stats",
   "frame": { "w": 480, "h": 72 },
   "props": {
     "label": {

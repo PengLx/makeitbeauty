@@ -1,6 +1,7 @@
 {
   "id": "gradient-banner",
   "title": "Gradient banner",
+  "category": "banners",
   "description": "Full-bleed indigo→purple→slate gradient banner with kicker, title, subtitle and a cyan→fuchsia accent rule. The gradient is fixed by design: tw strings are static per definition (v1 constraint), so the slots are text-only.",
   "frame": { "w": 720, "h": 140 },
   "props": {

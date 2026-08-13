@@ -1,6 +1,7 @@
 {
   "id": "terminal-card",
   "title": "Terminal card",
+  "category": "cards",
   "description": "Terminal-style card: near-black window with three traffic-light dots, a prompt line, an output line, and a blinking block cursor on the next prompt. Chrome is fixed tw (static per definition, v1 constraint); the prompt/cursor accent is a prop routed through structured style fields, which ARE template-resolved. No mono font is loaded (Inter only), so the mono feel comes from tracking.",
   "frame": { "w": 560, "h": 180 },
   "props": {

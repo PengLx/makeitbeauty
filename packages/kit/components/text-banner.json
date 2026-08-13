@@ -1,6 +1,7 @@
 {
   "id": "text-banner",
   "title": "Text banner",
+  "category": "banners",
   "frame": { "w": 720, "h": 120 },
   "props": {
     "title": {

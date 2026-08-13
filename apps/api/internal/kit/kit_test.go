@@ -2,10 +2,12 @@ package kit
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -246,6 +248,82 @@ func TestLoadRejectsHalfNativeComponents(t *testing.T) {
 	}
 	if len(components) != 1 || components[0].ID != "kit/contribution-heatmap" {
 		t.Fatalf("components = %+v, want only kit/contribution-heatmap", components)
+	}
+}
+
+// The optional category slug (kit-component.schema.json) passes through to
+// /v1/kit so the editor can group the palette menu; absent stays absent
+// (omitempty), and an invalid slug is a malformed file (skipped) — a typo'd
+// category must not silently strand the component in the catch-all bucket.
+func TestLoadParsesCategory(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"categorized.json": `{"id": "a-card", "title": "Card", "category": "stats",
+			"frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,
+		"uncategorized.json": `{"id": "b-bare", "title": "Bare",
+			"frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`,
+	})
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 2 {
+		t.Fatalf("got %d components, want 2", len(components))
+	}
+	if got := components[0].Category; got != "stats" {
+		t.Errorf("Category = %q, want %q", got, "stats")
+	}
+	if got := components[1].Category; got != "" {
+		t.Errorf("uncategorized Category = %q, want empty (omitted on the wire)", got)
+	}
+	// omitempty: the JSON encoding of an uncategorized component has no key.
+	b, err := json.Marshal(components[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := m["category"]; present {
+		t.Errorf("category key present on an uncategorized component: %s", b)
+	}
+}
+
+func TestLoadRejectsInvalidCategory(t *testing.T) {
+	invalid := []string{"Stats", "1stats", "-stats", "sta ts", "stats!", strings.Repeat("s", 25)}
+	files := map[string]string{"good.json": validStatCard}
+	for i, cat := range invalid {
+		files[fmt.Sprintf("bad-%d.json", i)] = fmt.Sprintf(
+			`{"id": "bad-%d", "title": "Bad", "category": %q, "frame": {"w": 10, "h": 10}, "nodes": [{"id": "bg", "type": "rect"}]}`, i, cat)
+	}
+	dir := writeFiles(t, files)
+	components, err := Load(dir, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 || components[0].ID != "kit/stat-card" {
+		t.Fatalf("components = %+v, want only kit/stat-card (invalid categories skipped)", components)
+	}
+}
+
+// Every shipped kit component carries a category from the recommended
+// taxonomy — the palette menu must never show an official component in the
+// catch-all bucket.
+func TestShippedKitComponentsAreCategorized(t *testing.T) {
+	components, err := Load("../../../../packages/kit/components", discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) == 0 {
+		t.Fatal("no shipped components loaded")
+	}
+	taxonomy := map[string]bool{"cards": true, "stats": true, "data": true, "banners": true, "decor": true}
+	for _, c := range components {
+		if c.Category == "" {
+			t.Errorf("%s: no category", c.ID)
+		} else if !taxonomy[c.Category] {
+			t.Errorf("%s: category %q is outside the recommended taxonomy", c.ID, c.Category)
+		}
 	}
 }
 

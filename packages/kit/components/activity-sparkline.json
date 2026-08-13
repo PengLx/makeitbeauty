@@ -1,6 +1,7 @@
 {
   "id": "activity-sparkline",
   "title": "Activity sparkline",
+  "category": "data",
   "description": "The last 84 days of commit activity as 12 weekly bars with a staggered growY entrance and an optional peak-week label. Native component — the renderer generates the bars from stats.calendar; the nodes below are the static palette preview.",
   "native": true,
   "dataFields": ["stats.calendar"],

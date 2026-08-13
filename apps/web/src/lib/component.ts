@@ -34,6 +34,8 @@ export interface ComponentDefinition {
   id: string;
   title: string;
   description?: string;
+  /** Optional palette-menu category slug (schema `category`); absent = none. */
+  category?: string;
   frame: { w: number; h: number };
   props: Record<string, ComponentPropDecl>;
   nodes: FragmentNode[];

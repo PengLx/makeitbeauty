@@ -1,6 +1,7 @@
 {
   "id": "quote-banner",
   "title": "Quote banner",
+  "category": "banners",
   "description": "A quote with a large quotation mark and an accent bar that grows out.",
   "frame": { "w": 720, "h": 90 },
   "props": {

@@ -259,7 +259,9 @@ with KMS-managed keys (see SECURITY.md).
   latest published definition (public when published);
   `GET /v1/components/{owner}/{name}/versions/{n}` immutable definition (public);
   `DELETE /v1/components/{owner}/{name}` unlist (owner);
-  `GET /v1/community/components?q=` browse published, newest first (public).
+  `GET /v1/community/components?q=&category=` browse published, newest first
+  (public; q searches id/title/description, category is an exact-slug filter,
+  both compose).
 - Auth (GitHub App user OAuth): `GET /v1/auth/github/login` → 302 to GitHub
   authorize (CSRF `state` in a short-lived cookie); `GET /v1/auth/github/callback`
   → code exchange (user token, 8h + refresh), upsert user, provision the GitHub

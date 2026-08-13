@@ -1,6 +1,7 @@
 {
   "id": "stat-card",
   "title": "Stat card",
+  "category": "stats",
   "frame": { "w": 260, "h": 140 },
   "props": {
     "label": {

@@ -27,7 +27,7 @@ func TestHandleKitHTTP(t *testing.T) {
 		{ID: "kit/progress-bar", Title: "Progress bar", Frame: kit.Frame{W: 260, H: 32}, Props: json.RawMessage(`{}`),
 			Nodes:    json.RawMessage(`[{"id":"fill","type":"rect"}]`),
 			Computed: json.RawMessage(`[{"node":"fill","field":"w","prop":"percent","scale":4.4}]`)},
-		{ID: "kit/stat-card", Title: "Stat card", Description: "A headline metric.", Frame: kit.Frame{W: 260, H: 140}, Props: json.RawMessage(`{"label":{"type":"string"}}`),
+		{ID: "kit/stat-card", Title: "Stat card", Description: "A headline metric.", Category: "stats", Frame: kit.Frame{W: 260, H: 140}, Props: json.RawMessage(`{"label":{"type":"string"}}`),
 			Nodes: json.RawMessage(`[{"id":"bg","type":"rect"}]`)},
 	}})
 
@@ -49,6 +49,7 @@ func TestHandleKitHTTP(t *testing.T) {
 		ID          string                 `json:"id"`
 		Title       string                 `json:"title"`
 		Description string                 `json:"description"`
+		Category    string                 `json:"category"`
 		Frame       struct{ W, H float64 } `json:"frame"`
 		Props       json.RawMessage        `json:"props"`
 		Native      bool                   `json:"native"`
@@ -69,6 +70,10 @@ func TestHandleKitHTTP(t *testing.T) {
 	c := components[2]
 	if c.Title != "Stat card" || c.Description != "A headline metric." {
 		t.Errorf("title/description = %q/%q, want Stat card/A headline metric.", c.Title, c.Description)
+	}
+	// The palette-menu category passes through so the editor can group the menu.
+	if c.Category != "stats" {
+		t.Errorf("category = %q, want stats", c.Category)
 	}
 	if c.Frame.W != 260 || c.Frame.H != 140 {
 		t.Errorf("frame = %+v, want {260 140}", c.Frame)
@@ -107,6 +112,11 @@ func TestHandleKitHTTP(t *testing.T) {
 	}
 	if _, present := raw[1]["description"]; present {
 		t.Error("description should be omitted when empty")
+	}
+	for _, i := range []int{0, 1} {
+		if _, present := raw[i]["category"]; present {
+			t.Errorf("components[%d]: category should be omitted on uncategorized components", i)
+		}
 	}
 	for _, i := range []int{1, 2} {
 		if _, present := raw[i]["native"]; present {

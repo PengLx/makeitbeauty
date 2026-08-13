@@ -1,6 +1,7 @@
 {
   "id": "accent-divider",
   "title": "Accent divider",
+  "category": "decor",
   "description": "Thin accent rule that grows out, ending in a blinking terminal-cursor square.",
   "frame": { "w": 720, "h": 24 },
   "props": {

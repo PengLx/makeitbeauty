@@ -14,6 +14,7 @@ component is a single JSON file:
 {
   "id": "stat-card",              // referenced as "kit/stat-card"
   "title": "Stat card",           // shown in the editor palette
+  "category": "stats",            // optional palette-menu group (lowercase slug)
   "frame": { "w": 260, "h": 140 },// the component's own coordinate space
   "props": {                      // declared slots, with types + defaults
     "label": { "type": "string", "description": "…", "default": "Followers" }
@@ -21,6 +22,13 @@ component is a single JSON file:
   "nodes": [ /* design-schema nodes, positioned relative to the frame */ ]
 }
 ```
+
+- **`category`** (optional) groups the component in the editor's palette menu.
+  It is a lowercase slug (`^[a-z][a-z0-9-]{0,23}$`); uncategorized components
+  land in a catch-all bucket. The recommended taxonomy — the official kit uses
+  exactly these — is `cards` (framed containers/showcases), `stats`
+  (single-number metrics and meters), `data` (array-driven connector visuals),
+  `banners` (wide text/header strips) and `decor` (dividers and ornaments).
 
 - **`nodes`** is a design fragment: an array using exactly the node types of
   [`packages/schema/design.schema.json`](../schema/design.schema.json)
@@ -177,19 +185,23 @@ of motion get the final, static frame.
 
 ## Components (v0)
 
-| Id | File | Frame | Purpose |
-|---|---|---|---|
-| `kit/stat-card` | [components/stat-card.json](components/stat-card.json) | 260×140 | One headline metric with label + caption |
-| `kit/text-banner` | [components/text-banner.json](components/text-banner.json) | 720×120 | Title + subtitle banner with accent tick |
-| `kit/progress-bar` | [components/progress-bar.json](components/progress-bar.json) | 480×72 | Labeled percentage bar (computed fill width, fill grows out via `growX`) |
-| `kit/profile-header` | [components/profile-header.json](components/profile-header.json) | 720×120 | Name + @login + followers, staggered `slideUp` entrance |
-| `kit/metric-badge` | [components/metric-badge.json](components/metric-badge.json) | 200×56 | Compact `label: value` pill with accent left border, `fadeIn` |
-| `kit/stat-trio` | [components/stat-trio.json](components/stat-trio.json) | 720×110 | Three stat cells, each `slideUp` with 0/120/240ms stagger |
-| `kit/quote-banner` | [components/quote-banner.json](components/quote-banner.json) | 720×90 | Quote with accent quotation mark and a `growX` underline bar |
-| `kit/accent-divider` | [components/accent-divider.json](components/accent-divider.json) | 720×24 | Thin accent rule (`growX`) ending in a looping `blink` cursor square |
-| `kit/gradient-banner` | [components/gradient-banner.json](components/gradient-banner.json) | 720×140 | tw showcase: full-bleed indigo→purple→slate gradient banner, kicker/title/subtitle slots, cyan→fuchsia `growX` rule |
-| `kit/glow-stat` | [components/glow-stat.json](components/glow-stat.json) | 280×140 | tw showcase: glassy card (rgba bg + border + arbitrary glow shadow) with a big number and gradient underline |
-| `kit/terminal-card` | [components/terminal-card.json](components/terminal-card.json) | 560×180 | tw showcase: terminal window with traffic-light dots, two prompt lines and a looping `blink` block cursor |
+| Id | File | Category | Frame | Purpose |
+|---|---|---|---|---|
+| `kit/stat-card` | [components/stat-card.json](components/stat-card.json) | `stats` | 260×140 | One headline metric with label + caption |
+| `kit/text-banner` | [components/text-banner.json](components/text-banner.json) | `banners` | 720×120 | Title + subtitle banner with accent tick |
+| `kit/progress-bar` | [components/progress-bar.json](components/progress-bar.json) | `stats` | 480×72 | Labeled percentage bar (computed fill width, fill grows out via `growX`) |
+| `kit/profile-header` | [components/profile-header.json](components/profile-header.json) | `banners` | 720×120 | Name + @login + followers, staggered `slideUp` entrance |
+| `kit/metric-badge` | [components/metric-badge.json](components/metric-badge.json) | `stats` | 200×56 | Compact `label: value` pill with accent left border, `fadeIn` |
+| `kit/stat-trio` | [components/stat-trio.json](components/stat-trio.json) | `stats` | 720×110 | Three stat cells, each `slideUp` with 0/120/240ms stagger |
+| `kit/quote-banner` | [components/quote-banner.json](components/quote-banner.json) | `banners` | 720×90 | Quote with accent quotation mark and a `growX` underline bar |
+| `kit/accent-divider` | [components/accent-divider.json](components/accent-divider.json) | `decor` | 720×24 | Thin accent rule (`growX`) ending in a looping `blink` cursor square |
+| `kit/gradient-banner` | [components/gradient-banner.json](components/gradient-banner.json) | `banners` | 720×140 | tw showcase: full-bleed indigo→purple→slate gradient banner, kicker/title/subtitle slots, cyan→fuchsia `growX` rule |
+| `kit/glow-stat` | [components/glow-stat.json](components/glow-stat.json) | `stats` | 280×140 | tw showcase: glassy card (rgba bg + border + arbitrary glow shadow) with a big number and gradient underline |
+| `kit/terminal-card` | [components/terminal-card.json](components/terminal-card.json) | `cards` | 560×180 | tw showcase: terminal window with traffic-light dots, two prompt lines and a looping `blink` block cursor |
+| `kit/contribution-heatmap` | [components/contribution-heatmap.json](components/contribution-heatmap.json) | `data` | 720×140 | Native: GitHub-style contribution calendar, cells generated from `stats.calendar` |
+| `kit/activity-sparkline` | [components/activity-sparkline.json](components/activity-sparkline.json) | `data` | 360×100 | Native: last 84 days of commits as 12 weekly bars with a staggered `growY` entrance |
+| `kit/language-bar` | [components/language-bar.json](components/language-bar.json) | `data` | 720×110 | Native: top languages as a stacked horizontal bar with legend |
+| `kit/streak-flame` | [components/streak-flame.json](components/streak-flame.json) | `data` | 360×140 | Native: current contribution streak with pulsing flame accent + longest-streak record |
 
 All components use the GitHub-dark palette (`#0d1117` / `#161b22` / `#21262d`
 / `#30363d` / `#58a6ff` / `#e6edf3` / `#7d8590`) with consistent radii

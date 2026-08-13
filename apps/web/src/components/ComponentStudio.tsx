@@ -48,7 +48,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { KIT_CATEGORIES, categoryLabel, isKnownCategory } from "@/lib/paletteMenu";
 
 interface Props {
   me: Me;
@@ -94,6 +103,11 @@ function extractDraft(
       };
   base.id = componentId;
   if (!base.title) base.title = record.title || componentId;
+  // Older drafts predate `category`; the record's metadata-level value (kept
+  // in sync by every PUT) fills the gap so the publish dialog shows truth.
+  if (base.category === undefined && record.category) {
+    base.category = record.category;
+  }
   return base;
 }
 
@@ -608,6 +622,48 @@ export function ComponentStudio({ me, componentId, onBack }: Props) {
                   publish v{nextVersion + 1} later.
                 </DialogDescription>
               </DialogHeader>
+              {def && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="publish-category">Category</Label>
+                  {/* Recommended taxonomy + None. Writes onto the draft
+                      definition (dirty → saved by handlePublish before the
+                      freeze), flowing through the extended create/update API
+                      into the immutable version — the editor palette menu
+                      groups by it. "none" is a sentinel: Radix Select items
+                      can't carry an empty value. */}
+                  <Select
+                    value={def.category ?? "none"}
+                    onValueChange={(v) =>
+                      applyDef({
+                        ...def,
+                        category: v === "none" ? undefined : v,
+                      })
+                    }
+                  >
+                    <SelectTrigger id="publish-category" className="w-full">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {/* A slug outside the taxonomy (set via the API) stays
+                          selectable rather than silently rendering blank. */}
+                      {def.category && !isKnownCategory(def.category) && (
+                        <SelectItem value={def.category}>
+                          {def.category}
+                        </SelectItem>
+                      )}
+                      {KIT_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {categoryLabel(c)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Where the editor palette menu groups this component.
+                  </p>
+                </div>
+              )}
               {dirty && (
                 <p className="text-xs text-muted-foreground">
                   Unsaved changes will be saved first, so the frozen version is

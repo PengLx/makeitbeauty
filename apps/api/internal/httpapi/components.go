@@ -52,6 +52,7 @@ type componentDefinition struct {
 	ID          string          `json:"id"`
 	Title       string          `json:"title"`
 	Description string          `json:"description,omitempty"`
+	Category    string          `json:"category,omitempty"`
 	Frame       kit.Frame       `json:"frame"`
 	Props       json.RawMessage `json:"props"`
 	Nodes       json.RawMessage `json:"nodes"`
@@ -65,6 +66,7 @@ type componentView struct {
 	ID            string          `json:"id"`
 	Title         string          `json:"title"`
 	Description   string          `json:"description,omitempty"`
+	Category      string          `json:"category,omitempty"`
 	LatestVersion int             `json:"latestVersion"`
 	Unlisted      bool            `json:"unlisted,omitempty"`
 	CreatedAt     time.Time       `json:"createdAt"`
@@ -85,7 +87,7 @@ type componentVersionView struct {
 // publicComponentView hides owner-only state (draft, unlisted flag).
 func publicComponentView(c *store.Component) componentView {
 	return componentView{
-		ID: c.ID, Title: c.Title, Description: c.Description,
+		ID: c.ID, Title: c.Title, Description: c.Description, Category: c.Category,
 		LatestVersion: c.LatestVersion, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
@@ -156,6 +158,15 @@ func decodeComponentBody(w http.ResponseWriter, r *http.Request, v any, shape st
 	return true
 }
 
+// validateComponentCategory checks the optional palette-menu category slug
+// (kit-component.schema.json); "" means uncategorized and is always fine.
+func validateComponentCategory(category string) error {
+	if category != "" && !kit.CategoryPattern.MatchString(category) {
+		return fmt.Errorf("category must be a lowercase slug matching %s (e.g. cards, stats, data, banners, decor)", kit.CategoryPattern)
+	}
+	return nil
+}
+
 // validateComponentMeta checks the API-owned definition fields against
 // kit-component.schema.json limits; everything deeper is the renderer's
 // publish-time job.
@@ -211,14 +222,15 @@ func normalizeRawField(raw json.RawMessage, want byte, fallback json.RawMessage,
 // ---- POST /v1/components --------------------------------------------------
 
 type createComponentRequest struct {
-	Name  string     `json:"name"`
-	Title string     `json:"title"`
-	Frame *kit.Frame `json:"frame"`
+	Name     string     `json:"name"`
+	Title    string     `json:"title"`
+	Category string     `json:"category"` // optional palette-menu slug
+	Frame    *kit.Frame `json:"frame"`
 }
 
 func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
 	var req createComponentRequest
-	if !decodeComponentBody(w, r, &req, "{name, title, frame:{w,h}}") {
+	if !decodeComponentBody(w, r, &req, "{name, title, category?, frame:{w,h}}") {
 		return
 	}
 	if !componentNamePattern.MatchString(req.Name) {
@@ -226,6 +238,10 @@ func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateComponentMeta(req.Title, "", req.Frame); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := validateComponentCategory(req.Category); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -244,7 +260,7 @@ func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
 	// Draft ids carry the unversioned qualified form "{owner}/{name}" — the
 	// renderer's validator requires it; the "@{n}" pin is added at publish.
 	draft, err := json.Marshal(componentDefinition{
-		ID: id, Title: req.Title, Frame: *req.Frame,
+		ID: id, Title: req.Title, Category: req.Category, Frame: *req.Frame,
 		Props: json.RawMessage(`{}`), Nodes: json.RawMessage(`[]`),
 	})
 	if err != nil {
@@ -253,7 +269,7 @@ func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	component := &store.Component{
-		ID: id, OwnerID: userID(r), Title: req.Title, Draft: draft,
+		ID: id, OwnerID: userID(r), Title: req.Title, Category: req.Category, Draft: draft,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	err = s.stores.Components.Create(r.Context(), component)
@@ -292,6 +308,7 @@ type componentDraftRequest struct {
 	ID          string          `json:"id"`
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
+	Category    string          `json:"category"` // optional palette-menu slug; "" clears it
 	Frame       *kit.Frame      `json:"frame"`
 	Props       json.RawMessage `json:"props"`
 	Nodes       json.RawMessage `json:"nodes"`
@@ -304,7 +321,7 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req componentDraftRequest
-	if !decodeComponentBody(w, r, &req, "{id?, title, description?, frame:{w,h}, props?, nodes?, computed?}") {
+	if !decodeComponentBody(w, r, &req, "{id?, title, description?, category?, frame:{w,h}, props?, nodes?, computed?}") {
 		return
 	}
 	if req.ID != "" && req.ID != component.ID {
@@ -312,6 +329,10 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := validateComponentMeta(req.Title, req.Description, req.Frame); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := validateComponentCategory(req.Category); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -332,7 +353,8 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 	}
 
 	draft, err := json.Marshal(componentDefinition{
-		ID: component.ID, Title: req.Title, Description: req.Description, Frame: *req.Frame,
+		ID: component.ID, Title: req.Title, Description: req.Description,
+		Category: req.Category, Frame: *req.Frame,
 		Props: props, Nodes: nodes, Computed: computed,
 	})
 	if err != nil {
@@ -341,6 +363,7 @@ func (s *Server) handleUpdateComponentDraft(w http.ResponseWriter, r *http.Reque
 	}
 	component.Title = req.Title
 	component.Description = req.Description
+	component.Category = req.Category
 	component.Draft = draft
 	component.UpdatedAt = time.Now().UTC()
 	if err := s.stores.Components.Update(r.Context(), component); err != nil {
@@ -492,8 +515,10 @@ func (s *Server) handleUnlistComponent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---- GET /v1/community/components?q= -----------------------------------------
+// ---- GET /v1/community/components?q=&category= --------------------------------
 // Public browse of published + listed components, newest-published first.
+// q= substring-matches id/title/description; category= is an exact slug match;
+// both compose (AND). Filtering never changes the ordering contract.
 
 func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) {
 	components, err := s.stores.Components.List(r.Context())
@@ -502,6 +527,10 @@ func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	// Stored categories are lowercase slugs, so lowercasing the param keeps
+	// the match exact while forgiving pasted capitalization. A slug that
+	// matches nothing yields an empty list, not an error.
+	category := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
 
 	type entry struct {
 		view        componentView
@@ -510,6 +539,9 @@ func (s *Server) handleBrowseComponents(w http.ResponseWriter, r *http.Request) 
 	entries := []entry{}
 	for _, c := range components {
 		if c.LatestVersion == 0 || c.Unlisted {
+			continue
+		}
+		if category != "" && c.Category != category {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(c.ID), q) &&

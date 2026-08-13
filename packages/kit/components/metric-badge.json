@@ -1,6 +1,7 @@
 {
   "id": "metric-badge",
   "title": "Metric badge",
+  "category": "stats",
   "description": "Compact label: value pill with an accent left border.",
   "frame": { "w": 200, "h": 56 },
   "props": {

@@ -248,6 +248,8 @@ export interface ComponentRecord {
   id: string;
   title: string;
   description?: string;
+  /** Palette-menu category slug; absent = uncategorized ("other" group). */
+  category?: string;
   latestVersion: number;
   unlisted?: boolean;
   createdAt?: string;
@@ -266,6 +268,8 @@ export interface CommunityComponent {
   owner: string;
   title: string;
   description?: string;
+  /** Palette-menu category slug; also a click-to-filter facet in the palette. */
+  category?: string;
   latestVersion: number;
   updatedAt?: string;
 }
@@ -294,6 +298,12 @@ function toComponentRecord(body: unknown): ComponentRecord {
     id: String(raw.id ?? ""),
     title: String(raw.title ?? raw.id ?? ""),
     description: typeof raw.description === "string" ? raw.description : undefined,
+    // The API omits an unset category ("" never appears on the wire), but an
+    // older/other server sending "" must still mean "uncategorized".
+    category:
+      typeof raw.category === "string" && raw.category !== ""
+        ? raw.category
+        : undefined,
     latestVersion:
       typeof raw.latestVersion === "number"
         ? raw.latestVersion
@@ -361,6 +371,8 @@ export async function updateComponent(
       title: definition.title,
       // undefined serializes away; "" is a valid "no description".
       description: definition.description,
+      // Optional palette-menu slug; undefined/"" both mean "clear it".
+      category: definition.category,
       frame: definition.frame,
       props: definition.props,
       nodes: definition.nodes,
@@ -386,14 +398,22 @@ export async function publishComponent(
   return (await getComponent(owner, name)).latestVersion;
 }
 
-/** GET /v1/community/components?q= — published components, newest first (public). */
+/**
+ * GET /v1/community/components?q=&category= — published components, newest
+ * first (public). `q` substring-matches id/title/description server-side;
+ * `category` is an exact slug facet; they compose (AND).
+ */
 export async function listCommunity(
   q: string,
+  category?: string,
   signal?: AbortSignal,
 ): Promise<CommunityComponent[]> {
-  const query = q.trim() === "" ? "" : `?q=${encodeURIComponent(q.trim())}`;
+  const params = new URLSearchParams();
+  if (q.trim() !== "") params.set("q", q.trim());
+  if (category) params.set("category", category);
+  const qs = params.toString();
   const body = await request<{ components?: unknown[] } | unknown[]>(
-    `/v1/community/components${query}`,
+    `/v1/community/components${qs === "" ? "" : `?${qs}`}`,
     { signal },
   );
   const items = Array.isArray(body) ? body : (body.components ?? []);
@@ -406,6 +426,7 @@ export async function listCommunity(
         typeof raw.owner === "string" ? raw.owner : record.id.split("/")[0] ?? "",
       title: record.title,
       description: record.description,
+      category: record.category,
       latestVersion: record.latestVersion,
       updatedAt: record.updatedAt,
     };

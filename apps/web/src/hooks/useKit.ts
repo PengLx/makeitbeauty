@@ -13,6 +13,11 @@ export interface KitComponent {
   id: string;
   title: string;
   description?: string;
+  /**
+   * Palette-menu group slug (schema `category`, omitted when absent).
+   * lib/paletteMenu.ts sorts unknown/missing categories into "other".
+   */
+  category?: string;
   frame: { w: number; h: number };
   props: Record<string, KitProp>;
   /**

@@ -53,12 +53,18 @@ func doJSONAs(t *testing.T, h http.Handler, method, path, body string, cookie *h
 // seedComponent stores a component directly; publish freezes versions 1..n.
 func seedComponent(t *testing.T, s *Server, id, ownerID, title, description string, published int, unlisted bool, publishedAt time.Time) {
 	t.Helper()
+	seedCategorizedComponent(t, s, id, ownerID, title, description, "", published, unlisted, publishedAt)
+}
+
+// seedCategorizedComponent is seedComponent with a palette-menu category.
+func seedCategorizedComponent(t *testing.T, s *Server, id, ownerID, title, description, category string, published int, unlisted bool, publishedAt time.Time) {
+	t.Helper()
 	ctx := context.Background()
 	now := publishedAt
 	draft := json.RawMessage(fmt.Sprintf(`{"id":%q,"title":%q,"frame":{"w":100,"h":50},"props":{},"nodes":[{"id":"bg","type":"rect","x":0,"y":0,"w":100,"h":50,"fill":"#111"}]}`,
 		id, title))
 	if err := s.stores.Components.Create(ctx, &store.Component{
-		ID: id, OwnerID: ownerID, Title: title, Description: description,
+		ID: id, OwnerID: ownerID, Title: title, Description: description, Category: category,
 		Draft: draft, LatestVersion: published, Unlisted: unlisted,
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
 	}); err != nil {
@@ -149,6 +155,10 @@ func TestCreateComponentValidationTable(t *testing.T) {
 		{"zero frame", `{"name":"x","title":"T","frame":{"w":0,"h":10}}`},
 		{"negative frame", `{"name":"x","title":"T","frame":{"w":10,"h":-1}}`},
 		{"oversized frame", `{"name":"x","title":"T","frame":{"w":5000,"h":10}}`},
+		{"uppercase category", `{"name":"x","title":"T","category":"Stats","frame":{"w":1,"h":1}}`},
+		{"category leading digit", `{"name":"x","title":"T","category":"1stats","frame":{"w":1,"h":1}}`},
+		{"category with space", `{"name":"x","title":"T","category":"my stats","frame":{"w":1,"h":1}}`},
+		{"category too long", `{"name":"x","title":"T","category":"` + strings.Repeat("c", 25) + `","frame":{"w":1,"h":1}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -300,6 +310,8 @@ func TestUpdateComponentDraftValidationTable(t *testing.T) {
 		{"nodes not an array", `{"title":"T","frame":{"w":1,"h":1},"nodes":{}}`},
 		{"computed not an array", `{"title":"T","frame":{"w":1,"h":1},"computed":{}}`},
 		{"unknown field", `{"title":"T","frame":{"w":1,"h":1},"animation":"pulse"}`},
+		{"uppercase category", `{"title":"T","category":"Stats","frame":{"w":1,"h":1}}`},
+		{"category with slash", `{"title":"T","category":"a/b","frame":{"w":1,"h":1}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -310,6 +322,70 @@ func TestUpdateComponentDraftValidationTable(t *testing.T) {
 				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// ---- category lifecycle -------------------------------------------------------
+// The optional palette-menu category flows create → draft → update → publish:
+// stored on the component, embedded in the draft definition, frozen into
+// published versions, and omitted (never "") wherever it is unset.
+
+func TestComponentCategoryLifecycle(t *testing.T) {
+	s, h := newTestServer(t)
+
+	// Create with a category.
+	rec := doJSON(t, h, http.MethodPost, "/v1/components", `{"name":"badge","title":"Badge","category":"stats","frame":{"w":200,"h":56}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"category":"stats"`) {
+		t.Errorf("create view lacks category: %s", rec.Body.String())
+	}
+	c, err := s.stores.Components.Get(context.Background(), "dev/badge")
+	if err != nil || c.Category != "stats" {
+		t.Fatalf("stored category = %q, %v, want stats", c.Category, err)
+	}
+	if !strings.Contains(string(c.Draft), `"category":"stats"`) {
+		t.Errorf("draft definition lacks category: %s", c.Draft)
+	}
+
+	// Update to another category.
+	rec = doJSON(t, h, http.MethodPut, "/v1/components/dev/badge",
+		`{"title":"Badge","category":"decor","frame":{"w":200,"h":56},"nodes":[{"id":"bg","type":"rect","x":0,"y":0,"w":200,"h":56,"fill":"#111"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	c, _ = s.stores.Components.Get(context.Background(), "dev/badge")
+	if c.Category != "decor" || !strings.Contains(string(c.Draft), `"category":"decor"`) {
+		t.Errorf("updated category = %q, draft = %s, want decor in both", c.Category, c.Draft)
+	}
+
+	// Publish freezes the category into the immutable definition.
+	_, _, _ = mockValidator(t, s, http.StatusOK, `{"ok":true}`)
+	rec = doJSON(t, h, http.MethodPost, "/v1/components/dev/badge/publish", "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("publish status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"category":"decor"`) {
+		t.Errorf("frozen definition lacks category: %s", rec.Body.String())
+	}
+	frozen, err := s.stores.ComponentVersions.Get(context.Background(), "dev/badge", 1)
+	if err != nil || !strings.Contains(string(frozen.Definition), `"category":"decor"`) {
+		t.Errorf("stored frozen definition = %s, %v, want category decor", frozen.Definition, err)
+	}
+
+	// Omitting category on update clears it — and it disappears from the
+	// wire (omitempty), it never serializes as "".
+	rec = doJSON(t, h, http.MethodPut, "/v1/components/dev/badge", `{"title":"Badge","frame":{"w":200,"h":56}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clearing update status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"category"`) {
+		t.Errorf("cleared category still on the wire: %s", rec.Body.String())
+	}
+	c, _ = s.stores.Components.Get(context.Background(), "dev/badge")
+	if c.Category != "" || strings.Contains(string(c.Draft), `"category"`) {
+		t.Errorf("category not cleared: %q / %s", c.Category, c.Draft)
 	}
 }
 
@@ -602,6 +678,84 @@ func TestBrowseComponents(t *testing.T) {
 	rec = doJSONAs(t, h, http.MethodGet, "/v1/community/components?q=zzz-no-match", "", nil)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Components) != 0 {
 		t.Errorf("no-match browse = %s", rec.Body.String())
+	}
+}
+
+// &category= filters by exact slug and composes with q; ordering (newest
+// published first) is untouched by filtering.
+func TestBrowseComponentsCategoryFilterMatrix(t *testing.T) {
+	s, h := newVisibilityServer(t) // seeds alice/pub (published, no category)
+	base := time.Now().UTC()
+	seedCategorizedComponent(t, s, "alice/badge", "u-alice", "Badge", "Tiny stat.", "stats", 1, false, base.Add(-time.Hour))
+	seedCategorizedComponent(t, s, "alice/graph", "u-alice", "Graph", "Line chart.", "data", 1, false, base.Add(time.Hour))
+	seedCategorizedComponent(t, s, "alice/gauge", "u-alice", "Gauge", "Round meter.", "stats", 1, false, base.Add(2*time.Hour))
+	// Unlisted stays hidden even when its category matches the filter.
+	seedCategorizedComponent(t, s, "alice/secret", "u-alice", "Secret", "", "stats", 1, true, base.Add(3*time.Hour))
+
+	tests := []struct {
+		name    string
+		query   string
+		wantIDs string // comma-joined, in response order
+	}{
+		{"no filters keeps full browse order", "", "alice/gauge,alice/graph,alice/pub,alice/badge"},
+		{"category exact match, order preserved", "?category=stats", "alice/gauge,alice/badge"},
+		{"another category", "?category=data", "alice/graph"},
+		{"category composes with q", "?category=stats&q=tiny", "alice/badge"},
+		{"category AND q can rule everything out", "?category=stats&q=line", ""},
+		{"unknown category matches nothing", "?category=ghost", ""},
+		{"category param is case-forgiving", "?category=STATS", "alice/gauge,alice/badge"},
+		{"uncategorized components match no category", "?category=uncategorized", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := doJSONAs(t, h, http.MethodGet, "/v1/community/components"+tt.query, "", nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			var out struct {
+				Components []struct {
+					ID       string `json:"id"`
+					Category string `json:"category"`
+				} `json:"components"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			ids := []string{}
+			for _, c := range out.Components {
+				ids = append(ids, c.ID)
+			}
+			if got := strings.Join(ids, ","); got != tt.wantIDs {
+				t.Errorf("ids = %q, want %q", got, tt.wantIDs)
+			}
+		})
+	}
+
+	// Browse entries carry the category (and omit it when unset).
+	rec := doJSONAs(t, h, http.MethodGet, "/v1/community/components", "", nil)
+	var raw struct {
+		Components []map[string]any `json:"components"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range raw.Components {
+		id, _ := c["id"].(string)
+		cat, present := c["category"]
+		switch id {
+		case "alice/badge", "alice/gauge":
+			if cat != "stats" {
+				t.Errorf("%s: category = %v, want stats", id, cat)
+			}
+		case "alice/graph":
+			if cat != "data" {
+				t.Errorf("%s: category = %v, want data", id, cat)
+			}
+		case "alice/pub":
+			if present {
+				t.Errorf("%s: category should be omitted when unset, got %v", id, cat)
+			}
+		}
 	}
 }
 

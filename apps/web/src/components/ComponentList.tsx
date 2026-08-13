@@ -15,6 +15,7 @@ import {
 } from "@/lib/hoverPreview";
 import { twApproxStyle } from "@/lib/tw";
 import { cn } from "@/lib/utils";
+import { CategoryChip } from "./CategoryChip";
 import { PreviewHoverCard } from "./PreviewHoverCard";
 import { useMyComponents } from "@/hooks/useMyComponents";
 import { timeAgo } from "@/lib/format";
@@ -248,8 +249,11 @@ export function ComponentList({ me, onNavigate, onOpen }: Props) {
                         {c.id}
                       </CardDescription>
                     </CardHeader>
-                    <CardFooter className="text-[11px] text-muted-foreground">
-                      {c.updatedAt ? `Updated ${timeAgo(c.updatedAt)}` : " "}
+                    <CardFooter className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      {c.category && <CategoryChip category={c.category} />}
+                      <span className="truncate">
+                        {c.updatedAt ? `Updated ${timeAgo(c.updatedAt)}` : " "}
+                      </span>
                     </CardFooter>
                   </Card>
                 </li>

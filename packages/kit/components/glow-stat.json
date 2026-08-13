@@ -1,6 +1,7 @@
 {
   "id": "glow-stat",
   "title": "Glow stat",
+  "category": "stats",
   "description": "Glassy stat card — translucent panel with a cyan glow shadow, one headline number, an uppercase label, and a cyan→fuchsia underline that grows out. The glass + glow chrome is fixed tw (static per definition, v1 constraint); the slots are text-only.",
   "frame": { "w": 280, "h": 140 },
   "props": {
