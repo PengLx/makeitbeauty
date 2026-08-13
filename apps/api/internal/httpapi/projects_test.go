@@ -42,11 +42,12 @@ func newTestServerWith(t *testing.T, stores store.Stores) (*Server, http.Handler
 	registry := connector.NewRegistry()
 	registry.Register(fakeGitHub{})
 	s := &Server{
-		cfg:    config.Config{Env: "dev"},
-		log:    log,
-		stores: stores,
-		cache:  connector.NewSnapshotCache(registry, log),
-		usage:  newUsageIndex(),
+		cfg:      config.Config{Env: "dev"},
+		log:      log,
+		stores:   stores,
+		cache:    connector.NewSnapshotCache(registry, log),
+		usage:    newUsageIndex(),
+		fontsDir: t.TempDir(), // font binaries live outside the metadata store
 	}
 	return s, s.Handler()
 }

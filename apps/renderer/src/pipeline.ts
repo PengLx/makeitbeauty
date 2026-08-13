@@ -59,6 +59,10 @@ export async function render(
 
   // Step 3+4: one satori pass for the static set (canvas background included),
   // one transparent pass per animated layer on the same canvas geometry.
+  // `families` = every family loaded for THIS request (built-ins + request
+  // fonts, lowercased — CSS matching is case-insensitive); text nodes naming
+  // anything else warn and fall back to the default face (tree.ts textEl).
+  const families = new Set(fonts.map((f) => f.name.toLowerCase()));
   const { staticNodes, layers } = splitRenderItems(items);
   const satoriOptions = {
     width: design.canvas.width,
@@ -72,7 +76,7 @@ export async function render(
   const basePass = await satori(
     buildCanvas(
       design.canvas,
-      staticNodes.map((n) => buildNode(n, warnings)),
+      staticNodes.map((n) => buildNode(n, warnings, families)),
       /* transparent */ false,
       warnings,
     ) as never,
@@ -84,7 +88,7 @@ export async function render(
     const pass = await satori(
       buildCanvas(
         design.canvas,
-        layer.nodes.map((n) => buildNode(n, warnings)),
+        layer.nodes.map((n) => buildNode(n, warnings, families)),
         /* transparent */ true,
       ) as never,
       satoriOptions,

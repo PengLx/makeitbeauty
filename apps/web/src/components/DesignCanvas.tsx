@@ -19,6 +19,7 @@ import {
   letterSpacingPx,
   textJustify,
 } from "@/lib/canvasText";
+import { fontStackFor } from "@/lib/fonts";
 import {
   buildSnapTargets,
   effectiveSnapOptions,
@@ -621,7 +622,11 @@ function TextBody({ node, data }: { node: TextNode; data?: ConnectorData }) {
           textAlign: align,
         },
         {
-          fontFamily: s.fontFamily,
+          // Family + the Inter parity stack (lib/fonts.ts): built-ins are
+          // self-hosted (index.css), MY uploads arrive via useDesignFontFaces;
+          // anything unavailable degrades to Inter — the renderer's fallback.
+          fontFamily:
+            s.fontFamily !== undefined ? fontStackFor(s.fontFamily) : undefined,
           fontSize: s.fontSize,
           fontWeight: s.fontWeight,
           color: s.color,

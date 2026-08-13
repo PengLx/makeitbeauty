@@ -1,11 +1,15 @@
 /**
  * Internal HTTP routes (architecture.md §8). Never exposed publicly.
  *
- *   POST /internal/render              {design, data, options?, components?}
+ *   POST /internal/render              {design, data, options?, components?, fonts?}
  *                                      → 200 {svg, warnings}
  *   POST /internal/validate-component  {definition} → 200 {ok:true, warnings}
  *                                      or 422 {"error":{"code":"invalid_component",...}}
  *                                      (the API's publish flow calls this, §7.5)
+ *   GET  /internal/fonts               → 200 {"builtin":[{family, weights[]}]}
+ *                                      (ONE source of truth for the built-in
+ *                                      family list — the API proxies it into
+ *                                      GET /v1/fonts and its publish checks)
  *   GET  /healthz                      → 200 {"ok":true} (same shape as the API's)
  *
  * Exported as a factory so tests run the server on an ephemeral port;
@@ -13,7 +17,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import type { LoadedFont } from "./fonts.js";
+import { BUILTIN_FAMILIES, FontError, mergeFonts, parseRequestFonts, type LoadedFont } from "./fonts.js";
 import { KitError, parseCommunityComponent, parseRequestComponents } from "./kit.js";
 import { render } from "./pipeline.js";
 import { SanitizeError } from "./sanitize.js";
@@ -72,9 +76,9 @@ async function handleRender(
   res: ServerResponse,
   fonts: LoadedFont[],
 ): Promise<void> {
-  const body = await readJsonObject(req, res, "{design, data, options?, components?}");
+  const body = await readJsonObject(req, res, "{design, data, options?, components?, fonts?}");
   if (body === null) return;
-  const { design, data, options, components } = body;
+  const { design, data, options, components, fonts: requestFontsRaw } = body;
 
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     sendError(res, 400, "INVALID_REQUEST", '"data" must be an object');
@@ -106,12 +110,28 @@ async function handleRender(
     throw err;
   }
 
+  // Per-request user fonts (owner-only, base64 in the request — the renderer
+  // stays stateless): decode + magic-byte re-validation (defense in depth,
+  // the API checked the upload already), LRU-cached by content hash, merged
+  // OVER the built-ins for THIS request only. A font shadowing a built-in
+  // family is dropped with a warning — the built-in wins.
+  let requestFonts;
+  try {
+    requestFonts = parseRequestFonts(requestFontsRaw);
+  } catch (err) {
+    if (err instanceof FontError) {
+      sendError(res, 400, "INVALID_FONT", err.message);
+      return;
+    }
+    throw err;
+  }
+
   try {
     // validateDesign vouches for the shape; the cast is the trust boundary.
     const result = await render(
       design as never,
       data as Record<string, unknown>,
-      fonts,
+      mergeFonts(fonts, requestFonts.fonts),
       opts,
       requestComponents.components,
     );
@@ -119,7 +139,7 @@ async function handleRender(
     res.end(
       JSON.stringify({
         svg: result.svg,
-        warnings: [...requestComponents.warnings, ...result.warnings],
+        warnings: [...requestComponents.warnings, ...requestFonts.warnings, ...result.warnings],
       }),
     );
   } catch (err) {
@@ -167,6 +187,18 @@ export function createRendererServer(fonts: LoadedFont[]): Server {
       }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // Built-in family list — the single source of truth the API proxies into
+    // GET /v1/fonts ("builtin") and its community publish checks.
+    if (path === "/internal/fonts") {
+      if (req.method !== "GET") {
+        sendError(res, 405, "METHOD_NOT_ALLOWED", "use GET /internal/fonts");
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ builtin: BUILTIN_FAMILIES }));
       return;
     }
 

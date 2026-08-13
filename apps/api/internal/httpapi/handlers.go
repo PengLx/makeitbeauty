@@ -69,7 +69,9 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderAndReply(w, r, project.Design, data, output.Theme)
+	// Fonts resolve against the PROJECT OWNER (not the caller): deploy
+	// renders are token-authenticated, and the design is the owner's.
+	s.renderAndReply(w, r, project.UserID, project.Design, data, output.Theme)
 }
 
 // resolveBindingData merges the (cached) connector snapshots for a set of
@@ -156,18 +158,27 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		data = resolved
 	}
 
-	s.renderAndReply(w, r, req.Design, data, "")
+	// Previews resolve fonts against the session user — the same owner rule
+	// production renders apply, so preview = production for fonts too.
+	s.renderAndReply(w, r, userID(r), req.Design, data, "")
 }
 
-// renderAndReply resolves the design's pinned community components, calls the
-// renderer, and streams the SVG (or the mapped error envelope — always
-// non-200 on failure).
-func (s *Server) renderAndReply(w http.ResponseWriter, r *http.Request, design json.RawMessage, data map[string]any, theme string) {
+// renderAndReply resolves the design's pinned community components and the
+// owner's referenced fonts, calls the renderer, and streams the SVG (or the
+// mapped error envelope — always non-200 on failure). ownerID is the design
+// owner's user id: only the OWNER's uploaded fonts ever attach to a render
+// (architecture.md §5).
+func (s *Server) renderAndReply(w http.ResponseWriter, r *http.Request, ownerID string, design json.RawMessage, data map[string]any, theme string) {
 	components, ok := s.resolveDesignComponents(w, r, design)
 	if !ok {
 		return
 	}
-	result, err := s.renderer.Render(r.Context(), design, data, theme, components)
+	fonts, err := s.resolveDesignFonts(r.Context(), ownerID, design)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "resolving fonts failed")
+		return
+	}
+	result, err := s.renderer.Render(r.Context(), design, data, theme, components, fonts)
 	if err != nil {
 		var re *render.Error
 		if errors.As(err, &re) {

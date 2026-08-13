@@ -9,16 +9,24 @@
 # (src/paths.ts): packages/schema (design + kit schemas), packages/kit
 # (component fragments), examples/ (demo fixtures), apps/renderer/fonts.
 
-# ---- fonts: fetched at build time, same release as `make fonts` -----------
+# ---- fonts: fetched at build time, same releases as `make fonts` ----------
+# Built-in families (all OFL): Inter, JetBrains Mono, Lora — Regular + Bold.
+# Keep these URLs in sync with the Makefile fonts target.
 FROM node:24-slim AS fonts
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/*
 ARG INTER_URL=https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+ARG JBMONO_URL=https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+ARG LORA_URL=https://github.com/cyrealtype/Lora-Cyrillic/releases/download/v3.021/Lora.zip
 RUN mkdir -p /fonts \
  && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /tmp/inter.zip "$INTER_URL" \
+ && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /tmp/jbmono.zip "$JBMONO_URL" \
+ && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /tmp/lora.zip "$LORA_URL" \
  && unzip -o -j /tmp/inter.zip extras/ttf/Inter-Regular.ttf extras/ttf/Inter-Bold.ttf -d /fonts \
- && rm /tmp/inter.zip
+ && unzip -o -j /tmp/jbmono.zip fonts/ttf/JetBrainsMono-Regular.ttf fonts/ttf/JetBrainsMono-Bold.ttf -d /fonts \
+ && unzip -o -j /tmp/lora.zip ttf/Lora-Regular.ttf ttf/Lora-Bold.ttf -d /fonts \
+ && rm /tmp/inter.zip /tmp/jbmono.zip /tmp/lora.zip
 
 # ---- build: workspace-aware install + tsc ---------------------------------
 FROM node:24-slim AS build

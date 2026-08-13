@@ -217,7 +217,7 @@ of motion get the final, static frame.
 | `kit/accent-divider` | [components/accent-divider.json](components/accent-divider.json) | `decor` | 720×24 | Thin accent rule (`growX`) ending in a looping `blink` cursor square |
 | `kit/gradient-banner` | [components/gradient-banner.json](components/gradient-banner.json) | `banners` | 720×140 | tw showcase: full-bleed indigo→purple→slate gradient banner, kicker/title/subtitle slots, cyan→fuchsia `growX` rule |
 | `kit/glow-stat` | [components/glow-stat.json](components/glow-stat.json) | `stats` | 280×140 | tw showcase: glassy card (rgba bg + border + arbitrary glow shadow) with a big number and gradient underline |
-| `kit/terminal-card` | [components/terminal-card.json](components/terminal-card.json) | `cards` | 560×180 | tw showcase: terminal window with traffic-light dots, two prompt lines and a looping `blink` block cursor |
+| `kit/terminal-card` | [components/terminal-card.json](components/terminal-card.json) | `cards` | 560×180 | tw showcase: terminal window with traffic-light dots, two prompt lines in real JetBrains Mono and a looping `blink` block cursor |
 | `kit/contribution-heatmap` | [components/contribution-heatmap.json](components/contribution-heatmap.json) | `data` | 720×140 | Native: GitHub-style contribution calendar, cells generated from `stats.calendar` |
 | `kit/activity-sparkline` | [components/activity-sparkline.json](components/activity-sparkline.json) | `data` | 360×100 | Native: last 84 days of commits as 12 weekly bars with a staggered `growY` entrance |
 | `kit/language-bar` | [components/language-bar.json](components/language-bar.json) | `data` | 720×110 | Native: top languages as a stacked horizontal bar with legend |
@@ -232,7 +232,17 @@ All components use the GitHub-dark palette (`#0d1117` / `#161b22` / `#21262d`
 (12 card / 4 bar) and 16–20px padding, so they compose cleanly on a
 `#0d1117` canvas. The three tw showcase components layer the Tailwind-subset
 chrome (gradients, glass, glow shadows) on top of that same palette — their
-`tw` strings are fixed by design (see “`tw` in components” above), and the
-only mono-ish styling is `tracking`: the renderer currently loads **Inter
-only** (`apps/renderer/fonts/`), so no component may reference a monospace
-`fontFamily` until one ships.
+`tw` strings are fixed by design (see “`tw` in components” above).
+
+### Fonts in components
+
+The renderer ships three **built-in families** (`apps/renderer/fonts/`,
+fetched by `make fonts`): **Inter** (the default face), **JetBrains Mono**
+and **Lora**, each at weights 400 and 700 — `terminal-card` sets
+`style.fontFamily: "JetBrains Mono"` on its text nodes for real monospace
+glyphs (the old `tracking-wide` mono-fake is gone). Kit fragments may
+reference any built-in family; **community components may reference built-in
+families only** — user-uploaded fonts are private to their owner's designs
+(they travel per render request and never publish), so publish validation
+rejects any other `fontFamily`, and at render time an unknown family falls
+back to Inter with a warning instead of failing.

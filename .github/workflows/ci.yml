@@ -38,15 +38,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Fonts are gitignored release assets (Inter, from GitHub releases).
-      # Cached: the release download has proven flaky from CI runners (curl
-      # exit 56 even with retries), and the artifact never changes.
+      # Fonts are gitignored release assets (Inter + JetBrains Mono + Lora,
+      # from GitHub releases). Cached: the release downloads have proven
+      # flaky from CI runners (curl exit 56 even with retries), and the
+      # artifacts never change. Bump the key whenever the Makefile fonts
+      # target changes so the cache repopulates.
       - name: Cache fonts
         id: fonts-cache
         uses: actions/cache@v4
         with:
           path: apps/renderer/fonts
-          key: inter-4.1-ttf
+          key: mib-fonts-v2
 
       - name: Fetch fonts
         if: steps.fonts-cache.outputs.cache-hit != 'true'

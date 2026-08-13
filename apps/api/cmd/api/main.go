@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -105,6 +106,13 @@ func run(log *slog.Logger) error {
 
 	renderer := render.NewClient(cfg.RendererURL, 15*time.Second)
 
+	// Built-in font families, fetched from the renderer once at boot. The API
+	// may come up before (or without) the renderer — compose start order is
+	// not guaranteed — so failure falls back to the hardcoded OFL list
+	// (render.FallbackBuiltinFonts): GET /v1/fonts and the upload route's
+	// builtin-name clash check keep working either way.
+	builtinFonts := fetchBuiltinFonts(renderer, log)
+
 	// Kit registry: palette metadata for GET /v1/kit, loaded once at startup.
 	kitComponents, err := kit.Load(cfg.KitDir, log)
 	if err != nil {
@@ -132,6 +140,10 @@ func run(log *slog.Logger) error {
 		Renderer: renderer,
 		DemoData: demoData,
 		Kit:      kitComponents,
+		// Font binaries live under the data dir even with MIB_STORE=memory:
+		// the metadata may be throwaway, the bytes still need a filesystem.
+		FontsDir:     filepath.Join(cfg.DataDir, "fonts"),
+		BuiltinFonts: builtinFonts,
 	})
 	// Community usage counters (architecture.md §8): build the in-memory
 	// index from every project's ComponentRefs before serving — O(projects)
@@ -167,6 +179,23 @@ func run(log *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+// fetchBuiltinFonts asks the renderer for its built-in font families
+// (GET /internal/fonts) with a short timeout; an unreachable renderer or a
+// malformed response logs a warning and yields nil, which selects
+// render.FallbackBuiltinFonts inside httpapi — boot never depends on the
+// renderer being up.
+func fetchBuiltinFonts(renderer *render.Client, log *slog.Logger) []render.BuiltinFont {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	fonts, err := renderer.BuiltinFonts(ctx)
+	if err != nil {
+		log.Warn("renderer built-in font list unavailable; using the hardcoded fallback", "err", err)
+		return nil
+	}
+	log.Info("built-in fonts loaded from renderer", "families", len(fonts))
+	return fonts
 }
 
 // newStores selects the persistence backend per MIB_STORE (architecture.md

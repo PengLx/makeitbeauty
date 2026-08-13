@@ -129,6 +129,23 @@ type Favorite struct {
 	CreatedAt   time.Time // when the favorite was first set (Set keeps it)
 }
 
+// Font is the metadata of one user-uploaded font face (architecture.md §8).
+// The binary itself lives on disk under MIB_DATA_DIR/fonts/{userID}/
+// ({fontID}.{format}, 0600) — the store persists only this record. User fonts
+// are private to their owner: only the owner's designs ever attach them to a
+// render request, and community components may reference built-in families
+// only.
+type Font struct {
+	ID        string // "font-{hex}", the route identifier
+	UserID    string // owner; fonts are never shared across users
+	Family    string // display family name, matched against style.fontFamily
+	Weight    int    // 400 | 700
+	Format    string // "ttf" | "otf" | "woff" (magic-byte-detected; WOFF2 is rejected at upload)
+	Size      int64  // binary size in bytes (≤ 5 MB)
+	Hash      string // hex SHA-256 of the binary — ETag + the renderer's LRU cache key
+	CreatedAt time.Time
+}
+
 // Users persists accounts.
 type Users interface {
 	Create(ctx context.Context, u *User) error
@@ -239,6 +256,25 @@ type Favorites interface {
 	IsFavorited(ctx context.Context, userID string, componentIDs ...string) (map[string]bool, error)
 }
 
+// Fonts persists user-uploaded font metadata; binaries live on disk, keyed
+// by the record's ID and Format (httpapi owns the files, the store owns the
+// rows — deleting a font removes both, in that order).
+type Fonts interface {
+	// Create adds a new font. Returns ErrExists when the owner already has a
+	// font with the same family and weight — one face per (family, weight)
+	// keeps render-time family matching unambiguous; re-uploading requires a
+	// delete first.
+	Create(ctx context.Context, f *Font) error
+	Get(ctx context.Context, id string) (*Font, error)
+	// ListByUser returns all fonts of one user, unordered (presentation order
+	// is the caller's job). Its length enforces the per-user quota.
+	ListByUser(ctx context.Context, userID string) ([]*Font, error)
+	// Delete removes a font row. Returns ErrNotFound if no such font exists.
+	// Designs referencing the family thereafter fall back to the renderer's
+	// default (Inter) with a render warning — deliberately no cascade.
+	Delete(ctx context.Context, id string) error
+}
+
 // Stores bundles all persistence interfaces for wiring.
 type Stores struct {
 	Users             Users
@@ -248,4 +284,5 @@ type Stores struct {
 	Components        Components
 	ComponentVersions ComponentVersions
 	Favorites         Favorites
+	Fonts             Fonts
 }

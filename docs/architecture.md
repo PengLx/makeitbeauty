@@ -134,6 +134,20 @@ Secure cookies.
    see plain nodes. An instance's own `animation` applies to its expanded group as
    one layer.
 
+**Fonts**: three built-in OFL families ship inside the renderer — Inter,
+JetBrains Mono, Lora — usable by every design, and the ONLY families community
+components may reference (publish-time rejection; at render time an unknown
+family falls back to the default with a warning, never a failure — so a
+deleted user font degrades a card, it cannot break one). Users may also upload
+their own TTF/OTF/WOFF faces (WOFF2 is rejected at upload with an explanation:
+satori cannot parse it) for use in their OWN designs only — a stranger's
+design can never carry someone's private font. The renderer stays stateless:
+the API scans the design for `fontFamily` references, matches them against the
+design OWNER's uploads, and attaches the binaries to the render request as
+base64 (`fonts: [{family, weight?, style?, data}]`), which the renderer
+LRU-caches by content hash. Output remains text-to-path vectors, so Camo
+safety and the size budget are unaffected by which font rendered the text.
+
 The editor's live preview calls the same render path (`POST /v1/preview`), so
 preview = production output, byte for byte.
 
@@ -279,6 +293,25 @@ with KMS-managed keys (see SECURITY.md).
   at boot — O(projects), once — and maintained from ref diffs on project
   create/update/delete. Chosen over a persisted usage store deliberately:
   zero new persistence, and any drift self-heals on restart.
+- Fonts (§5 fonts; session auth): built-ins for everyone, uploads private to
+  their owner. `POST /v1/fonts` (multipart: `file` + `family` + optional
+  `weight` 400|700) → `{id, family, weight, format, size, createdAt}` —
+  magic-byte validated (TTF `0x00010000`/`true`, OTF `OTTO`, WOFF `wOFF`;
+  `wOF2` → 400 explaining satori's WOFF2 limitation), 5 MB/file, 10 fonts/user
+  (409), one face per (family, weight) (409), family printable ≤64 chars and
+  never a built-in name (400). `GET /v1/fonts` →
+  `{builtin: [{family, weights[]}], mine: [...]}` — built-ins come from the
+  renderer at boot (`GET /internal/fonts`), with a hardcoded fallback (Inter,
+  JetBrains Mono, Lora) so the API boots fine while the renderer is down.
+  `GET /v1/fonts/{id}/file` — owner-only binary for the editor's `FontFace`
+  registration (correct `font/*` Content-Type, ETag = content hash);
+  not-yours and not-found are the same 404. `DELETE /v1/fonts/{id}` removes
+  binary + metadata (owner-only); designs still naming the family thereafter
+  fall back to the renderer default (Inter) with a render warning —
+  deliberately NO cascade: a design can go plain but can never break.
+  Storage: binaries under `MIB_DATA_DIR/fonts/{userID}/{fontID}.{ext}`
+  (0600), metadata rows `Font {id, userId, family, weight, format, size,
+  hash, createdAt}` in the regular stores (`fonts.json`).
 - Auth (GitHub App user OAuth): `GET /v1/auth/github/login` → 302 to GitHub
   authorize (CSRF `state` in a short-lived cookie); `GET /v1/auth/github/callback`
   → code exchange (user token, 8h + refresh), upsert user, provision the GitHub
@@ -309,8 +342,15 @@ with KMS-managed keys (see SECURITY.md).
 ### Internal (`apps/renderer`, :7801 — never public)
 
 - `POST /internal/render` — body/response per `packages/schema/render.schema.json`:
-  request `{design, data, options?}` → `200 {svg, warnings[]}` or
-  `4xx/5xx {error:{code,message}}`.
+  request `{design, data, options?, components?, fonts?}` →
+  `200 {svg, warnings[]}` or `4xx/5xx {error:{code,message}}`. `fonts` is the
+  design owner's uploaded faces the design references, attached by the API as
+  `[{family, weight?, style?, data (base64 TTF/OTF/WOFF)}]` and LRU-cached
+  renderer-side by content hash (§5 fonts).
+- `GET /internal/fonts` → `{"builtin":[{family, weights[]}]}` — the renderer's
+  built-in family list, computed from its fonts directory. The API fetches it
+  once at boot and falls back to the hardcoded OFL list when the renderer is
+  unreachable.
 
 ### Dev seeds (`MIB_ENV=dev`)
 

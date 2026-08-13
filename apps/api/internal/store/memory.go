@@ -17,6 +17,7 @@ func NewMemory() Stores {
 		Components:        &memComponents{m: map[string]*Component{}},
 		ComponentVersions: &memComponentVersions{byComponent: map[string][]*ComponentVersion{}},
 		Favorites:         &memFavorites{m: map[string]*Favorite{}},
+		Fonts:             &memFonts{m: map[string]*Font{}},
 	}
 }
 
@@ -344,6 +345,67 @@ func (s *memFavorites) IsFavorited(_ context.Context, userID string, componentID
 		out[id] = ok
 	}
 	return out, nil
+}
+
+type memFonts struct {
+	mu sync.RWMutex
+	m  map[string]*Font // keyed by Font.ID
+}
+
+// fontFaceTaken reports whether the user already stores family+weight; the
+// caller holds at least a read lock.
+func fontFaceTaken(m map[string]*Font, userID, family string, weight int) bool {
+	for _, f := range m {
+		if f.UserID == userID && f.Family == family && f.Weight == weight {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *memFonts) Create(_ context.Context, f *Font) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fontFaceTaken(s.m, f.UserID, f.Family, f.Weight) {
+		return ErrExists // one face per (family, weight) per user
+	}
+	cp := *f
+	s.m[f.ID] = &cp
+	return nil
+}
+
+func (s *memFonts) Get(_ context.Context, id string) (*Font, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	f, ok := s.m[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *f
+	return &cp, nil
+}
+
+func (s *memFonts) ListByUser(_ context.Context, userID string) ([]*Font, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*Font{}
+	for _, f := range s.m {
+		if f.UserID == userID {
+			cp := *f
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *memFonts) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.m, id)
+	return nil
 }
 
 type memConnectorAccounts struct {

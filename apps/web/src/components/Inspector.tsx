@@ -32,8 +32,9 @@ import {
 } from "@/lib/snapping";
 import { Button } from "@/components/ui/button";
 import type { KitComponent, KitProp } from "@/hooks/useKit";
-import type { ConnectorInfo } from "@/lib/api";
+import type { ConnectorInfo, FontList } from "@/lib/api";
 import { BindingControl, FieldSelect, type BindingKind } from "@/components/BindingControl";
+import { FontPicker } from "@/components/FontPicker";
 import { TwField } from "@/components/TwField";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,6 +63,12 @@ interface Props {
    */
   propsOnly?: boolean;
   /**
+   * GET /v1/fonts list for the text section's family picker (Editor). Omit
+   * in the Studio: propsOnly narrows the picker to built-in families — a
+   * community component must never reference a private upload (§7.5).
+   */
+  fonts?: FontList | null;
+  /**
    * The canvas/frame spec the selected node aligns against (the project
    * canvas in the Editor, the component frame viewed as a canvas in the
    * Studio). Enables the Layout section's align row and, with onPatchCanvas,
@@ -84,6 +91,7 @@ export function Inspector({
   kit,
   connectors,
   propsOnly,
+  fonts,
   canvas,
   onPatch,
   onPatchCanvas,
@@ -158,6 +166,7 @@ export function Inspector({
         kit={kit}
         connectors={connectors}
         propsOnly={propsOnly}
+        fonts={fonts}
         patch={patch}
       />
       <Separator />
@@ -298,12 +307,14 @@ function TypeSection({
   kit,
   connectors,
   propsOnly,
+  fonts,
   patch,
 }: {
   node: DesignNode;
   kit: KitComponent | undefined;
   connectors: ConnectorInfo[];
   propsOnly?: boolean;
+  fonts?: FontList | null;
   patch: (p: Partial<DesignNode>) => void;
 }) {
   switch (node.type) {
@@ -313,6 +324,7 @@ function TypeSection({
           node={node}
           connectors={connectors}
           propsOnly={propsOnly}
+          fonts={fonts}
           patch={patch}
         />
       );
@@ -347,16 +359,24 @@ function TextSection({
   node,
   connectors,
   propsOnly,
+  fonts,
   patch,
 }: {
   node: TextNode;
   connectors: ConnectorInfo[];
   propsOnly?: boolean;
+  fonts?: FontList | null;
   patch: (p: Partial<DesignNode>) => void;
 }) {
   const s = node.style ?? {};
   const setStyle = (next: Partial<TextNode["style"]>) =>
     patch({ style: { ...s, ...next } });
+  /** Picker writes: Inter/default (undefined) truly DROPS the key so the
+      document serializes without a redundant fontFamily. */
+  const setFamily = (family: string | undefined) => {
+    const { fontFamily: _dropped, ...rest } = s;
+    patch({ style: family === undefined ? rest : { ...rest, fontFamily: family } });
+  };
   return (
     <Section title="Text">
       <Field label="Content">
@@ -387,6 +407,14 @@ function TextSection({
           />
         </Field>
       )}
+      <Field label="Font">
+        <FontPicker
+          value={s.fontFamily}
+          fonts={fonts}
+          studio={propsOnly}
+          onChange={setFamily}
+        />
+      </Field>
       <div className="grid grid-cols-2 gap-2">
         <NumberField
           label="Size"

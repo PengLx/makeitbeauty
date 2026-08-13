@@ -33,6 +33,7 @@ func NewFile(dir string) (Stores, error) {
 		components: map[string]*Component{},
 		versions:   map[string][]*ComponentVersion{},
 		favorites:  map[string]*Favorite{},
+		fonts:      map[string]*Font{},
 	}
 	if err := db.load(); err != nil {
 		return Stores{}, err
@@ -45,6 +46,7 @@ func NewFile(dir string) (Stores, error) {
 		Components:        &fileComponents{db},
 		ComponentVersions: &fileComponentVersions{db},
 		Favorites:         &fileFavorites{db},
+		Fonts:             &fileFonts{db},
 	}, nil
 }
 
@@ -62,6 +64,7 @@ const (
 	componentsFile = "components.json"
 	versionsFile   = "component_versions.json"
 	favoritesFile  = "favorites.json"
+	fontsFile      = "fonts.json"
 )
 
 type projectRecord struct {
@@ -119,6 +122,17 @@ type favoriteRecord struct {
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
+type fontRecord struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"userId"`
+	Family    string    `json:"family"`
+	Weight    int       `json:"weight"`
+	Format    string    `json:"format"`
+	Size      int64     `json:"size"`
+	Hash      string    `json:"hash"` // hex sha256 of the binary on disk
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // ---- shared database ----------------------------------------------------
 
 // fileDB holds all collections in memory under one mutex; files are the
@@ -133,6 +147,7 @@ type fileDB struct {
 	components map[string]*Component
 	versions   map[string][]*ComponentVersion // keyed by componentID
 	favorites  map[string]*Favorite           // keyed by userID + "\x00" + componentID
+	fonts      map[string]*Font               // keyed by Font.ID
 }
 
 func (db *fileDB) load() error {
@@ -213,6 +228,17 @@ func (db *fileDB) load() error {
 	for _, rec := range favorites {
 		db.favorites[favoriteKey(rec.UserID, rec.ComponentID)] = &Favorite{
 			UserID: rec.UserID, ComponentID: rec.ComponentID, CreatedAt: rec.CreatedAt,
+		}
+	}
+
+	var fonts []fontRecord
+	if err := db.readFile(fontsFile, &fonts); err != nil {
+		return err
+	}
+	for _, rec := range fonts {
+		db.fonts[rec.ID] = &Font{
+			ID: rec.ID, UserID: rec.UserID, Family: rec.Family, Weight: rec.Weight,
+			Format: rec.Format, Size: rec.Size, Hash: rec.Hash, CreatedAt: rec.CreatedAt,
 		}
 	}
 	return nil
@@ -361,6 +387,18 @@ func (db *fileDB) persistFavorites() error {
 		return out[i].ComponentID < out[j].ComponentID
 	})
 	return db.writeFile(favoritesFile, out)
+}
+
+func (db *fileDB) persistFonts() error {
+	out := make([]fontRecord, 0, len(db.fonts))
+	for _, f := range db.fonts {
+		out = append(out, fontRecord{
+			ID: f.ID, UserID: f.UserID, Family: f.Family, Weight: f.Weight,
+			Format: f.Format, Size: f.Size, Hash: f.Hash, CreatedAt: f.CreatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return db.writeFile(fontsFile, out)
 }
 
 func (db *fileDB) persistAccounts() error {
@@ -687,6 +725,53 @@ func (s *fileFavorites) IsFavorited(_ context.Context, userID string, componentI
 		out[id] = ok
 	}
 	return out, nil
+}
+
+type fileFonts struct{ db *fileDB }
+
+func (s *fileFonts) Create(_ context.Context, f *Font) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	if fontFaceTaken(s.db.fonts, f.UserID, f.Family, f.Weight) {
+		return ErrExists // one face per (family, weight) per user
+	}
+	cp := *f
+	s.db.fonts[f.ID] = &cp
+	return s.db.persistFonts()
+}
+
+func (s *fileFonts) Get(_ context.Context, id string) (*Font, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	f, ok := s.db.fonts[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *f
+	return &cp, nil
+}
+
+func (s *fileFonts) ListByUser(_ context.Context, userID string) ([]*Font, error) {
+	s.db.mu.RLock()
+	defer s.db.mu.RUnlock()
+	out := []*Font{}
+	for _, f := range s.db.fonts {
+		if f.UserID == userID {
+			cp := *f
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *fileFonts) Delete(_ context.Context, id string) error {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	if _, ok := s.db.fonts[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.db.fonts, id)
+	return s.db.persistFonts()
 }
 
 type fileConnectorAccounts struct{ db *fileDB }

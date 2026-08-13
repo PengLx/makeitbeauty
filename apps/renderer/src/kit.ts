@@ -27,6 +27,7 @@ import addFormatsExport, { type FormatsPlugin } from "ajv-formats";
 const addFormats = addFormatsExport as unknown as FormatsPlugin;
 
 import type { NodeGroup, RenderItem } from "./animate.js";
+import { BUILTIN_FAMILIES, isBuiltinFamily } from "./fonts.js";
 import { connectorSubtree, nativeGenerators } from "./native.js";
 import { repoPath } from "./paths.js";
 import { resolveDeep } from "./template.js";
@@ -270,6 +271,30 @@ function checkPropsOnlyTemplates(
   }
 }
 
+/**
+ * Font isolation rule: a community fragment may reference BUILT-IN font
+ * families only. User-uploaded fonts are private to their owner's designs —
+ * they travel per-request and never publish, so a stranger's component can
+ * never carry (or demand) someone's private font. The value must be a
+ * literal built-in name: a template here would dodge the check, so it is
+ * rejected too (render-time fallback+warning still guards anything that
+ * slips through). Kit fragments may use any built-in.
+ */
+function checkBuiltinFontFamilies(component: KitComponent, context: string): void {
+  for (const [i, node] of component.nodes.entries()) {
+    if (node.type !== "text" || node.style?.fontFamily === undefined) continue;
+    const family = node.style.fontFamily;
+    if (!isBuiltinFamily(family)) {
+      const builtin = BUILTIN_FAMILIES.map((f) => `"${f.family}"`).join(", ");
+      throw new KitError(
+        `${context}: nodes[${i}].style.fontFamily ${JSON.stringify(family)} is not a built-in ` +
+          `font family — community components may only use the built-ins (${builtin}); ` +
+          `user-uploaded fonts stay private to their owner's designs`,
+      );
+    }
+  }
+}
+
 export interface CommunityParseOptions {
   /** Render-request definitions must pin a published version ("@{n}"); publish-time drafts need not. */
   requireVersion?: boolean;
@@ -337,6 +362,7 @@ export function parseCommunityComponent(
   }
   const component = raw as unknown as KitComponent;
   assertComponentSemantics(component, context);
+  checkBuiltinFontFamilies(component, context);
 
   const warnings: string[] = [];
   checkPropsOnlyTemplates(component, "", component, context, warnings);

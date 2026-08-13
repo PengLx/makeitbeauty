@@ -50,7 +50,7 @@ render perfectly inside GitHub's README sandbox.
 
 ```bash
 pnpm install
-make fonts   # one-time: downloads Inter into apps/renderer/fonts/ (gitignored)
+make fonts   # one-time: downloads Inter + JetBrains Mono + Lora into apps/renderer/fonts/ (gitignored)
 
 # terminal 1 — render service (:7801)
 make dev-renderer

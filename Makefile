@@ -2,11 +2,20 @@
 
 # The renderer embeds text as vector paths and needs .ttf/.otf files in
 # apps/renderer/fonts/ (gitignored — fetched at setup, not committed).
+# Built-in families (all OFL): Inter, JetBrains Mono, Lora — Regular + Bold.
+# Keep these URLs in sync with deploy/docker/renderer.Dockerfile (fonts stage)
+# and bump the .github/workflows/ci.yml fonts cache key when they change.
 INTER_URL := https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+JBMONO_URL := https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+LORA_URL := https://github.com/cyrealtype/Lora-Cyrillic/releases/download/v3.021/Lora.zip
 fonts:
 	tmp=$$(mktemp -d) && \
 	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o $$tmp/inter.zip $(INTER_URL) && \
+	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o $$tmp/jbmono.zip $(JBMONO_URL) && \
+	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o $$tmp/lora.zip $(LORA_URL) && \
 	unzip -o -j $$tmp/inter.zip extras/ttf/Inter-Regular.ttf extras/ttf/Inter-Bold.ttf -d apps/renderer/fonts/ && \
+	unzip -o -j $$tmp/jbmono.zip fonts/ttf/JetBrainsMono-Regular.ttf fonts/ttf/JetBrainsMono-Bold.ttf -d apps/renderer/fonts/ && \
+	unzip -o -j $$tmp/lora.zip ttf/Lora-Regular.ttf ttf/Lora-Bold.ttf -d apps/renderer/fonts/ && \
 	rm -rf $$tmp
 
 dev-api:

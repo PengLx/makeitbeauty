@@ -8,6 +8,13 @@
    canvas node text opts into Inter via CANVAS_TEXT_DEFAULTS. */
 @import "@fontsource/inter/latin-400.css";
 @import "@fontsource/inter/latin-700.css";
+/* The other BUILT-IN render families (lib/fonts.ts BUILTIN_FONTS): same
+   pattern and weights as Inter above — the renderer embeds all three, and
+   canvas text opts in per node via style.fontFamily. */
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-700.css";
+@import "@fontsource/lora/latin-400.css";
+@import "@fontsource/lora/latin-700.css";
 
 @custom-variant dark (&:is(.dark *));
 

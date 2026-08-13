@@ -17,6 +17,7 @@ import { useCanvasDisplay } from "../hooks/useCanvasDisplay";
 import { useSnapSettings } from "../hooks/useSnapSettings";
 import { useMyComponents } from "../hooks/useMyComponents";
 import { useComponentDefs } from "../hooks/useComponentDefs";
+import { useFonts, useDesignFontFaces } from "../hooks/useFonts";
 import {
   isUserComponentRef,
   splitComponentId,
@@ -137,6 +138,12 @@ export function Editor({ me, projectId, onBack }: Props) {
   // keeps canvas templates literal. Editor-only — the Studio is props-only
   // by design (§7.5).
   const connectorData = useConnectorData();
+
+  // Font list for the inspector's family picker (one load, refetched on
+  // upload/delete via fontCache invalidation); the FontFace effect keeps the
+  // canvas rendering MY uploaded fonts the design references.
+  const { fonts } = useFonts();
+  useDesignFontFaces(fonts, design);
 
   // Lives at the Editor level so the preview survives tab switches. Sends the
   // CURRENT project design; null (still loading) skips rendering.
@@ -545,6 +552,7 @@ export function Editor({ me, projectId, onBack }: Props) {
                   : undefined
               }
               connectors={connectors ?? []}
+              fonts={fonts}
               canvas={design.canvas}
               onPatch={patchNode}
               onPatchCanvas={patchCanvas}

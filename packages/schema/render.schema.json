@@ -26,6 +26,30 @@
           "type": "array",
           "description": "Community component definitions the design references, resolved by the API (registry stays out of the renderer — it remains a pure function). Each item is a kit-component document (see kit-component.schema.json) whose id is the fully-qualified pinned reference, e.g. \"penglx/glow-card@3\". Merged over the built-in kit registry for this request only.",
           "items": { "type": "object" }
+        },
+        "fonts": {
+          "type": "array",
+          "description": "The design owner's uploaded fonts, resolved by the API (the renderer stays stateless — fonts travel inside the request and are LRU-cached by content hash). Merged over the built-in families (Inter, JetBrains Mono, Lora) for this request only; an entry whose family collides with a built-in is dropped with a warning — the built-in always wins. Community components may reference built-in families only, so these fonts never leave the owner's own designs.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["family", "data"],
+            "properties": {
+              "family": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "Font family name text nodes reference via style.fontFamily."
+              },
+              "weight": { "enum": [400, 700], "default": 400 },
+              "style": { "enum": ["normal", "italic"], "default": "normal" },
+              "data": {
+                "type": "string",
+                "contentEncoding": "base64",
+                "description": "Base64 TTF, OTF or WOFF bytes (5 MB max decoded, magic-byte validated). WOFF2 is rejected — the renderer's text engine (satori) cannot parse WOFF2's Brotli-compressed glyph tables."
+              }
+            }
+          }
         }
       }
     },

@@ -43,14 +43,27 @@ function baseStyle(node: DesignNode): Style {
   return style;
 }
 
-function textEl(node: TextNode, warnings: string[]): El {
+function textEl(node: TextNode, warnings: string[], families?: ReadonlySet<string>): El {
   const s = node.style ?? {};
   const align = s.align ?? "left";
   const justify = align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start";
 
   // Explicit structured fields only — these override tw (§5.6 merge order).
   const structured: Style = {};
-  if (s.fontFamily !== undefined) structured.fontFamily = s.fontFamily;
+  if (s.fontFamily !== undefined) {
+    // Unknown families never reach satori (its silent fallback would pick an
+    // arbitrary loaded font): warn and render the default face instead.
+    // `families` holds lowercased names of every font loaded for THIS request
+    // (built-ins + request fonts) — CSS family matching is case-insensitive.
+    if (families !== undefined && !families.has(s.fontFamily.toLowerCase())) {
+      warnings.push(
+        `${node.id}: unknown font family "${s.fontFamily}" — falling back to ${DEFAULT_FONT_FAMILY}`,
+      );
+      structured.fontFamily = DEFAULT_FONT_FAMILY;
+    } else {
+      structured.fontFamily = s.fontFamily;
+    }
+  }
   if (s.fontSize !== undefined) structured.fontSize = s.fontSize;
   if (s.fontWeight !== undefined) structured.fontWeight = s.fontWeight;
   if (s.color !== undefined) structured.color = s.color;
@@ -143,10 +156,14 @@ function instanceEl(node: InstanceNode): El {
   };
 }
 
-export function buildNode(node: DesignNode, warnings: string[] = []): El {
+export function buildNode(
+  node: DesignNode,
+  warnings: string[] = [],
+  families?: ReadonlySet<string>,
+): El {
   switch (node.type) {
     case "text":
-      return textEl(node, warnings);
+      return textEl(node, warnings, families);
     case "rect":
       return rectEl(node, warnings);
     case "image":

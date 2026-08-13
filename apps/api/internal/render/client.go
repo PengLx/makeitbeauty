@@ -47,6 +47,36 @@ func NewClient(baseURL string, timeout time.Duration) *Client {
 	return &Client{baseURL: baseURL, http: &http.Client{Timeout: timeout}}
 }
 
+// Font is one user-uploaded font face attached to a render request
+// (architecture.md §5/§8): the renderer stays stateless, so the binary
+// travels inside the request as base64 and is LRU-cached renderer-side by
+// content hash. Only the design OWNER's fonts are ever attached — a
+// stranger's design can never carry someone's private font.
+type Font struct {
+	Family string `json:"family"`
+	Weight int    `json:"weight,omitempty"` // 400 | 700
+	Style  string `json:"style,omitempty"`  // "normal" | "italic"
+	Data   string `json:"data"`             // base64 TTF/OTF/WOFF (satori cannot parse WOFF2)
+}
+
+// BuiltinFont is one server-side font family every design may use.
+type BuiltinFont struct {
+	Family  string `json:"family"`
+	Weights []int  `json:"weights"`
+}
+
+// FallbackBuiltinFonts mirrors the renderer's bundled OFL families. It exists
+// because the API may boot while the renderer is down (compose start order,
+// tests, fixture-only runs): font upload validation (builtin-name clash) and
+// GET /v1/fonts must keep working, so this hardcoded list stands in until the
+// renderer — the source of truth via GET /internal/fonts — is reachable at a
+// later boot. Keep it in sync with apps/renderer/fonts.
+var FallbackBuiltinFonts = []BuiltinFont{
+	{Family: "Inter", Weights: []int{400, 700}},
+	{Family: "JetBrains Mono", Weights: []int{400, 700}},
+	{Family: "Lora", Weights: []int{400, 700}},
+}
+
 // request/response wire shapes per render.schema.json.
 type renderRequest struct {
 	Design  json.RawMessage `json:"design"`
@@ -57,6 +87,9 @@ type renderRequest struct {
 	// e.g. "penglx/glow-card@3"), resolved by the API — the registry stays
 	// out of the renderer (architecture.md §7.5).
 	Components []json.RawMessage `json:"components,omitempty"`
+	// Fonts carries the owner's uploaded fonts the design references, as
+	// base64 — the renderer stays stateless (architecture.md §5).
+	Fonts []Font `json:"fonts,omitempty"`
 }
 
 type renderOptions struct {
@@ -72,13 +105,14 @@ type renderResponse struct {
 	} `json:"error"`
 }
 
-// Render posts (design, data, theme, components) and returns the SVG. data is
-// the merged, already-filtered snapshot map keyed by connector name;
+// Render posts (design, data, theme, components, fonts) and returns the SVG.
+// data is the merged, already-filtered snapshot map keyed by connector name;
 // components are the pinned community component definitions the design
-// references (nil when it references none). All failures are returned as
-// *Error with a public-API-appropriate status:
+// references (nil when it references none); fonts are the owner's uploaded
+// faces the design references (nil when it references none). All failures are
+// returned as *Error with a public-API-appropriate status:
 // renderer 4xx (bad design) → 422, renderer 5xx / unreachable → 502.
-func (c *Client) Render(ctx context.Context, design json.RawMessage, data map[string]any, theme string, components []json.RawMessage) (*Result, error) {
+func (c *Client) Render(ctx context.Context, design json.RawMessage, data map[string]any, theme string, components []json.RawMessage, fonts []Font) (*Result, error) {
 	if data == nil {
 		data = map[string]any{} // schema requires the field
 	}
@@ -86,7 +120,7 @@ func (c *Client) Render(ctx context.Context, design json.RawMessage, data map[st
 	if theme != "" && theme != "auto" {
 		opts = &renderOptions{Theme: theme}
 	}
-	body, err := json.Marshal(renderRequest{Design: design, Data: data, Options: opts, Components: components})
+	body, err := json.Marshal(renderRequest{Design: design, Data: data, Options: opts, Components: components, Fonts: fonts})
 	if err != nil {
 		return nil, &Error{Status: http.StatusInternalServerError, Code: "internal", Message: "encoding render request failed"}
 	}
@@ -180,4 +214,34 @@ func (c *Client) ValidateComponent(ctx context.Context, definition json.RawMessa
 		return &Error{Status: http.StatusBadRequest, Code: code, Message: message}
 	}
 	return &Error{Status: http.StatusBadGateway, Code: "renderer_unavailable", Message: fmt.Sprintf("renderer responded %d", resp.StatusCode)}
+}
+
+// BuiltinFonts fetches the renderer's built-in font families
+// (GET /internal/fonts → {"builtin":[{family, weights[]}]}). Called once at
+// API boot; on any failure the caller falls back to FallbackBuiltinFonts so
+// the API boots fine while the renderer is down (see that var's comment).
+func (c *Client) BuiltinFonts(ctx context.Context) ([]BuiltinFont, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/internal/fonts", nil)
+	if err != nil {
+		return nil, fmt.Errorf("render: building fonts request: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("render: renderer is unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("render: renderer responded %d to GET /internal/fonts", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("render: reading fonts response: %w", err)
+	}
+	var parsed struct {
+		Builtin []BuiltinFont `json:"builtin"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Builtin) == 0 {
+		return nil, fmt.Errorf("render: renderer returned a malformed font list")
+	}
+	return parsed.Builtin, nil
 }

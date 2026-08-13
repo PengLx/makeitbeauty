@@ -554,6 +554,78 @@ export async function getComponentVersion(
   );
 }
 
+// ---- fonts (font-system contract; §5 rendering) -------------------------
+
+/** One built-in family (embedded server-side, usable by everyone). */
+export interface BuiltinFontInfo {
+  family: string;
+  weights: number[];
+}
+
+/**
+ * One uploaded font file owned by the session user (§7-style ownership:
+ * usable only in the owner's designs; community components are rejected at
+ * publish if they reference it). weight is 400 or 700; format is the
+ * server-sniffed ttf/otf/woff.
+ */
+export interface UserFont {
+  id: string;
+  family: string;
+  weight: number;
+  format: string;
+  size: number;
+}
+
+/** GET /v1/fonts body: built-ins for the picker + the session's uploads. */
+export interface FontList {
+  builtin: BuiltinFontInfo[];
+  mine: UserFont[];
+}
+
+export async function listFonts(signal?: AbortSignal): Promise<FontList> {
+  const body = await request<Partial<FontList> | null>("/v1/fonts", { signal });
+  return {
+    builtin: Array.isArray(body?.builtin) ? body.builtin : [],
+    mine: Array.isArray(body?.mine) ? body.mine : [],
+  };
+}
+
+/**
+ * POST /v1/fonts (multipart: file + family + optional weight). The server
+ * enforces what the upload dialog pre-checks (5MB, 10 fonts/user, magic-byte
+ * TTF/OTF/WOFF validation — WOFF2 is a 400 explaining the satori
+ * limitation); its error envelope surfaces inline via ApiError. No explicit
+ * Content-Type: fetch derives the multipart boundary from the FormData.
+ */
+export function uploadFont(
+  file: File,
+  family: string,
+  weight?: number,
+): Promise<UserFont> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("family", family);
+  if (weight !== undefined) form.append("weight", String(weight));
+  return request("/v1/fonts", { method: "POST", body: form });
+}
+
+/**
+ * DELETE /v1/fonts/{id} — designs referencing the family keep rendering,
+ * falling back to Inter with a render warning (never a failure).
+ */
+export function deleteFont(id: string): Promise<void> {
+  return send("DELETE", `/v1/fonts/${encodeURIComponent(id)}`);
+}
+
+/**
+ * GET /v1/fonts/{id}/file (owner-only) — the canvas's FontFace source
+ * (lib/fontFaces.ts). A URL, not a fetch helper: the caller streams the
+ * binary itself.
+ */
+export function fontFileUrl(id: string): string {
+  return `/v1/fonts/${encodeURIComponent(id)}/file`;
+}
+
 // ---- deploy tokens (architecture §8) ------------------------------------
 
 export async function listDeployTokens(
