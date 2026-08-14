@@ -44,7 +44,7 @@ render perfectly inside GitHub's README sandbox.
 | `packages/kit` | Official component kit (declarative, Camo-safe) |
 | `packages/action` | GitHub Action + workflow templates for the schedule plane |
 | `examples/` | Canonical demo design + data fixtures used by tests and the editor |
-| `docs/` | Architecture, security model, [component authoring guide](docs/wiki/Home.md) |
+| `docs/` | Architecture, security model, [component authoring guide](docs/wiki/Home.md) (also on the [Wiki](https://github.com/PengLx/makeitbeauty/wiki)) |
 
 ## Quickstart (development)
 
