@@ -259,8 +259,9 @@ render({ props, frame }) => FragmentNode[]      // text/rect/image nodes only
   by the runtime, and publish executes twice and byte-compares), no async
   (render must return synchronously).
 - **Resource limits**: ~50ms CPU via the QuickJS interrupt handler, 32MB
-  memory, ≤512 output nodes, ≤64KB source. Violations are a publish-time
-  rejection and a render-time placeholder + warning — never a failed render.
+  memory, ≤512 output nodes, ≤512KiB serialized output, ≤64KB source.
+  Violations are a publish-time rejection and a render-time placeholder +
+  warning — never a failed render.
 - **Fresh context per execution** — no state survives between renders or
   users. Compiled modules are cached by sha256(source) like fonts.
 - **One engine everywhere**: `packages/sandbox` wraps QuickJS-WASM with the

@@ -36,7 +36,8 @@ component is a single JSON file:
   time in v0), positioned **relative to the declared `frame` w/h** — `(0,0)`
   is the component's own top-left corner.
 - **`props`** declares the component's slots. Each prop has a `type`
-  (`string` or `number` — colors are strings), an optional `description`,
+  (`string`, `number` or `series` — colors are strings, `series` carries
+  array data such as a contribution calendar), an optional `description`,
   and a required `default` used when an instance omits the prop (and for the
   palette preview). Defaults must match the declared type.
 - **Instances** reference a component as `kit/{id}` and pass props:
@@ -147,19 +148,20 @@ them into the design's binding for that connector on every instance, so the
 consent record covers what the image publicly displays. A snapshot without
 the component's connector renders the component's own muted empty state,
 never a failure. Community publish validation rejects `native`, `dataFields`
-and `dataConnector` alike — community components stay declarative-only.
+and `dataConnector` alike — natives ship with MakeItBeauty itself; community
+components are declarative or `kind: "code"` (see below), never native.
 
-## Declarative by design
+## Declarative by default, code when you need it
 
-v0 components are pure data: no code, no logic, no fetches. This is
-deliberate — components are the part of the system that third parties will
-eventually author, and declarative fragments are trivially safe to review,
-render, and sandbox. Per
-[architecture.md §10](../../docs/architecture.md#10-roadmap), community
-*declarative* components arrive in Phase 3 (with a registry: verified
-namespaces, immutable versions, no silent auto-updates), and *code*
-components only in Phase 4, as QuickJS-in-WASM pure render functions with no
-host APIs. Until that sandbox exists, "component" means "data".
+Declarative components are pure data: no logic, no fetches — trivially safe
+to review and render, and the right choice for most components. When array
+data demands real logic (a contribution heatmap, a bar chart), components
+may instead declare `kind: "code"`: a pure `render({props, frame}) => nodes`
+function executed in the capability-less QuickJS-in-WASM sandbox of
+[architecture.md §7.6](../../docs/architecture.md#76-code-components-sandboxed)
+— no network, no `Date`/`Math.random`, hard CPU/memory/output limits, output
+validated like any declarative fragment. The full authoring guide lives at
+[docs/wiki](../../docs/wiki/Home.md).
 
 Because fragments are just design-schema nodes, everything a component emits
 inherits the Camo-safe rules automatically: no external URLs (`data:` URIs
